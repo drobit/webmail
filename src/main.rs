@@ -1,6 +1,7 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
 use actix_cors::Cors;
 use lettre::{Message, SmtpTransport, Transport};
+use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, postgres::PgPoolOptions};
@@ -61,11 +62,11 @@ async fn send_email(data: web::Json<EmailRequest>, _state: web::Data<AppState>) 
         return HttpResponse::BadRequest().body("SMTP credentials not configured");
     }
 
-    // Use the simplest possible email creation
     let email = match Message::builder()
         .from(smtp_user.parse().unwrap())
         .to(data.to.parse().unwrap())
         .subject(&data.subject)
+        .header(ContentType::TEXT_PLAIN)
         .body(data.body.clone())
     {
         Ok(email) => email,

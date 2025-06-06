@@ -1,7 +1,6 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
 use actix_cors::Cors;
 use lettre::{Message, SmtpTransport, Transport};
-use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, postgres::PgPoolOptions};
@@ -62,11 +61,11 @@ async fn send_email(data: web::Json<EmailRequest>, _state: web::Data<AppState>) 
         return HttpResponse::BadRequest().body("SMTP credentials not configured");
     }
 
+    // Remove unused variable
     let email = match Message::builder()
         .from(smtp_user.parse().unwrap())
         .to(data.to.parse().unwrap())
         .subject(&data.subject)
-        .header(ContentType::TEXT_PLAIN)
         .body(data.body.clone())
     {
         Ok(email) => email,
@@ -74,7 +73,9 @@ async fn send_email(data: web::Json<EmailRequest>, _state: web::Data<AppState>) 
     };
 
     let creds = Credentials::new(smtp_user, smtp_pass);
-    let mailer = SmtpTransport::relay("smtp.gmail.com")
+
+    // Use STARTTLS instead of direct SSL - Gmail uses port 587 with STARTTLS
+    let mailer = SmtpTransport::starttls_relay("smtp.gmail.com")
         .unwrap()
         .port(587)
         .credentials(creds)
@@ -84,11 +85,11 @@ async fn send_email(data: web::Json<EmailRequest>, _state: web::Data<AppState>) 
     match mailer.send(&email) {
         Ok(_) => {
             println!("Email sent successfully!");
-            HttpResponse::Ok().body("Email sent")
+            HttpResponse::Ok().body("Email sent successfully!")
         },
         Err(e) => {
             println!("Email send error: {:?}", e);
-            HttpResponse::InternalServerError().body(format!("Error: {:?}", e))
+            HttpResponse::InternalServerError().body(format!("Email send failed: {:?}", e))
         },
     }
 }

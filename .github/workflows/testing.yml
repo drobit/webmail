@@ -13,9 +13,32 @@ on:
       - "src/**"
       - "tests/**"
 
+# Mock environment variables for testing - NOT real credentials
+env:
+  DATABASE_URL: "postgresql://test_user:test_pass@localhost:5432/test_db"
+  SMTP_USER: "test@example.com"
+  SMTP_PASS: "mock_app_password_16ch"
+  IMAP_USER: "test@example.com"
+  IMAP_PASS: "mock_app_password_16ch"
+
 jobs:
   testing:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +49,8 @@ jobs:
           toolchain: stable
           profile: minimal
 
-      - run: cargo test
+      - run: cargo test --lib
+
 
       - name: install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh

@@ -354,9 +354,17 @@
                 <h2>📬 Your Inbox</h2>
                 <div id="email-stats" class="email-stats"></div>
             </div>
-            <button id="refresh-btn" class="btn">
-                <span id="refresh-text">🔄 Refresh</span>
-            </button>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <select id="email-limit" class="form-control" style="width: auto; padding: 8px;">
+                    <option value="20">20 emails</option>
+                    <option value="50" selected>50 emails</option>
+                    <option value="100">100 emails</option>
+                    <option value="200">200 emails</option>
+                </select>
+                <button id="refresh-btn" class="btn">
+                    <span id="refresh-text">🔄 Refresh</span>
+                </button>
+            </div>
         </div>
 
         <div id="inbox-status"></div>
@@ -450,12 +458,14 @@
     async function fetchEmails() {
         const refreshBtn = document.getElementById('refresh-text');
         const emailList = document.getElementById('email-list');
+        const limitSelect = document.getElementById('email-limit');
+        const limit = limitSelect.value;
 
         refreshBtn.innerHTML = '<span class="loading-spinner"></span> Loading...';
-        showStatus('inbox-status', '📡 Fetching your emails...', 'loading');
+        showStatus('inbox-status', `📡 Fetching your last ${limit} emails...`, 'loading');
 
         try {
-            const response = await fetch(`${API_BASE}/fetch`);
+            const response = await fetch(`${API_BASE}/fetch?limit=${limit}`);
 
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -596,6 +606,9 @@
 
         // Refresh button
         document.getElementById('refresh-btn').addEventListener('click', fetchEmails);
+
+        // Email limit dropdown
+        document.getElementById('email-limit').addEventListener('change', fetchEmails);
 
         // Send form
         document.getElementById('email-form').addEventListener('submit', sendEmail);

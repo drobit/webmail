@@ -200,7 +200,7 @@ fn clean_email_body(raw_body: &[u8]) -> String {
     }
 }
 
-async fn fetch_emails(_state: web::Data<AppState>) -> HttpResponse {
+async fn fetch_emails(query: web::Query<std::collections::HashMap<String, String>>, _state: web::Data<AppState>) -> HttpResponse {
     let imap_user = env::var("IMAP_USER").unwrap_or_default();
     let imap_pass = env::var("IMAP_PASS").unwrap_or_default();
 
@@ -276,12 +276,18 @@ async fn fetch_emails(_state: web::Data<AppState>) -> HttpResponse {
         }
     };
 
-    // Get the last 20 messages (most recent)
+    // Get the number of emails to fetch from query parameter, default to 50
+    let limit: u32 = query.get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50)
+        .min(200); // Cap at 200 to prevent overwhelming the server
+
+    // Get the last N messages (most recent)
     let message_count = mailbox.exists;
-    let start_uid = if message_count > 20 { message_count - 19 } else { 1 };
+    let start_uid = if message_count > limit { message_count - limit + 1 } else { 1 };
     let fetch_range = format!("{}:{}", start_uid, message_count);
 
-    println!("Fetching messages: {}", fetch_range);
+    println!("Fetching {} messages: {}", limit, fetch_range);
 
     let messages_stream = match imap_session.fetch(&fetch_range, "(FLAGS ENVELOPE BODY[TEXT] INTERNALDATE)").await {
         Ok(stream) => {

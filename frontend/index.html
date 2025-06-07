@@ -72,7 +72,7 @@
             background: #f8f9fa;
             border-bottom: 1px solid #ddd;
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             gap: 1rem;
         }
@@ -84,7 +84,6 @@
         }
 
         .toolbar-right {
-            margin-left: auto;
             display: flex;
             gap: 0.5rem;
             align-items: center;
@@ -98,11 +97,19 @@
             cursor: pointer;
             font-size: 0.85rem;
             transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
         }
 
-        .btn:hover {
+        .btn:hover:not(:disabled) {
             background: #f8f9fa;
             border-color: #adb5bd;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .btn-primary {
@@ -111,7 +118,7 @@
             border-color: #007bff;
         }
 
-        .btn-primary:hover {
+        .btn-primary:hover:not(:disabled) {
             background: #0056b3;
         }
 
@@ -528,6 +535,7 @@
             this.emails = [];
             this.selectedEmail = null;
             this.emailLimit = 50;
+            this.isLoading = false; // Add loading state
 
             this.init();
         }
@@ -539,15 +547,20 @@
         }
 
         bindEvents() {
-            // Refresh button
-            document.getElementById('refresh-btn').addEventListener('click', () => {
-                this.loadEmails(true);
+            // Refresh button - Fixed to prevent infinite reload
+            document.getElementById('refresh-btn').addEventListener('click', (e) => {
+                e.preventDefault();
+                if (!this.isLoading) {
+                    this.loadEmails(true);
+                }
             });
 
             // Email limit selector
             document.getElementById('email-limit').addEventListener('change', (e) => {
                 this.emailLimit = parseInt(e.target.value);
-                this.loadEmails();
+                if (!this.isLoading) {
+                    this.loadEmails();
+                }
             });
 
             // Compose button
@@ -570,6 +583,9 @@
         }
 
         async loadEmails(forceRefresh = false) {
+            if (this.isLoading) return; // Prevent multiple simultaneous requests
+
+            this.isLoading = true;
             const refreshBtn = document.getElementById('refresh-btn');
             const refreshIcon = document.getElementById('refresh-icon');
             const refreshText = document.getElementById('refresh-text');
@@ -590,21 +606,31 @@
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
 
-                this.emails = await response.json();
-                this.renderEmailList();
-                this.updateStats();
-                this.showAlert('email-alerts', 'success', `Loaded ${this.emails.length} emails`, 2000);
+                const emailData = await response.json();
+
+                // Validate response data
+                if (Array.isArray(emailData)) {
+                    this.emails = emailData;
+                    this.renderEmailList();
+                    this.updateStats();
+                    this.showAlert('email-alerts', 'success', `Loaded ${this.emails.length} emails`, 2000);
+                } else {
+                    throw new Error('Invalid response format');
+                }
 
             } catch (error) {
                 console.error('Load emails error:', error);
                 this.showAlert('email-alerts', 'danger', `Failed to load emails: ${error.message}`);
                 this.renderEmptyList();
             } finally {
+                this.isLoading = false;
                 this.setLoading(refreshBtn, refreshIcon, refreshText, false);
             }
         }
 
         async checkNewEmails() {
+            if (this.isLoading) return; // Don't check while loading
+
             try {
                 // Get the latest email date to check for newer ones
                 const latestDate = this.emails.length > 0 ? this.emails[0].date : null;
@@ -617,7 +643,7 @@
 
                 const newEmails = await response.json();
 
-                if (newEmails.length > 0) {
+                if (Array.isArray(newEmails) && newEmails.length > 0) {
                     // Prepend new emails to the beginning of the list
                     this.emails = [...newEmails, ...this.emails];
                     this.renderEmailList();
@@ -643,26 +669,31 @@
         renderEmailList() {
             const listContainer = document.getElementById('email-list');
 
-            if (this.emails.length === 0) {
+            if (!Array.isArray(this.emails) || this.emails.length === 0) {
                 this.renderEmptyList();
                 return;
             }
 
             const emailsHtml = this.emails.map((email, index) => {
+                // Validate email object
+                if (!email || typeof email !== 'object') {
+                    return '';
+                }
+
                 const classes = ['email-item'];
                 if (!email.is_seen) classes.push('unread');
 
                 return `
-                        <li class="${classes.join(' ')}" data-email-id="${email.id}" onclick="webmail.selectEmail('${email.id}')">
-                            <div class="email-from">${this.escapeHtml(this.shortenText(email.from, 30))}
-                                ${!email.is_seen ? '<span class="badge badge-new">New</span>' : ''}
-                                ${email.is_recent ? '<span class="badge badge-recent">Recent</span>' : ''}
-                            </div>
-                            <div class="email-subject">${this.escapeHtml(this.shortenText(email.subject, 40))}</div>
-                            <div class="email-date">${this.formatDate(email.date)}</div>
-                        </li>
-                    `;
-            }).join('');
+                    <li class="${classes.join(' ')}" data-email-id="${this.escapeHtml(email.id || 'unknown')}" onclick="webmail.selectEmail('${this.escapeHtml(email.id || 'unknown')}')">
+                        <div class="email-from">${this.escapeHtml(this.shortenText(email.from || 'Unknown', 30))}
+                            ${!email.is_seen ? '<span class="badge badge-new">New</span>' : ''}
+                            ${email.is_recent ? '<span class="badge badge-recent">Recent</span>' : ''}
+                        </div>
+                        <div class="email-subject">${this.escapeHtml(this.shortenText(email.subject || 'No Subject', 40))}</div>
+                        <div class="email-date">${this.formatDate(email.date)}</div>
+                    </li>
+                `;
+            }).filter(html => html).join(''); // Filter out empty strings
 
             listContainer.innerHTML = emailsHtml;
         }
@@ -670,13 +701,15 @@
         renderEmptyList() {
             const listContainer = document.getElementById('email-list');
             listContainer.innerHTML = `
-                    <li style="padding: 2rem; text-align: center; color: #888;">
-                        📭 No emails found
-                    </li>
-                `;
+                <li style="padding: 2rem; text-align: center; color: #888;">
+                    📭 No emails found
+                </li>
+            `;
         }
 
         async selectEmail(emailId) {
+            if (this.isLoading || !emailId) return;
+
             // Remove previous selection
             document.querySelectorAll('.email-item').forEach(item => {
                 item.classList.remove('selected');
@@ -691,13 +724,13 @@
             // Show loading in preview panel
             const previewPanel = document.getElementById('email-preview');
             previewPanel.innerHTML = `
-                    <div class="empty-preview">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            Loading email...
-                        </div>
+                <div class="empty-preview">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading email...
                     </div>
-                `;
+                </div>
+            `;
 
             try {
                 const response = await fetch(`${this.apiBase}/email/${encodeURIComponent(emailId)}`);
@@ -713,17 +746,19 @@
                 const emailIndex = this.emails.findIndex(e => e.id === emailId);
                 if (emailIndex !== -1) {
                     this.emails[emailIndex].is_seen = true;
-                    emailItem.classList.remove('unread');
+                    if (emailItem) {
+                        emailItem.classList.remove('unread');
+                    }
                     this.updateStats();
                 }
 
             } catch (error) {
                 console.error('Load email detail error:', error);
                 previewPanel.innerHTML = `
-                        <div class="empty-preview">
-                            ❌ Failed to load email: ${error.message}
-                        </div>
-                    `;
+                    <div class="empty-preview">
+                        ❌ Failed to load email: ${error.message}
+                    </div>
+                `;
             }
 
             // Show preview panel on mobile
@@ -733,20 +768,31 @@
         }
 
         renderEmailPreview(email) {
+            if (!email || typeof email !== 'object') {
+                document.getElementById('email-preview').innerHTML = `
+                    <div class="empty-preview">
+                        ❌ Invalid email data
+                    </div>
+                `;
+                return;
+            }
+
             const previewPanel = document.getElementById('email-preview');
             previewPanel.innerHTML = `
-                    <div class="preview-header">
-                        <div class="preview-from">From: ${this.escapeHtml(email.from)}</div>
-                        <div class="preview-subject">${this.escapeHtml(email.subject)}</div>
-                        <div class="preview-date">${this.formatDate(email.date)}</div>
-                    </div>
-                    <div class="preview-body">${this.escapeHtml(email.body)}</div>
-                `;
+                <div class="preview-header">
+                    <div class="preview-from">From: ${this.escapeHtml(email.from || 'Unknown')}</div>
+                    <div class="preview-subject">${this.escapeHtml(email.subject || 'No Subject')}</div>
+                    <div class="preview-date">${this.formatDate(email.date)}</div>
+                </div>
+                <div class="preview-body">${this.escapeHtml(email.body || 'No content')}</div>
+            `;
         }
 
         updateStats() {
-            const unread = this.emails.filter(e => !e.is_seen).length;
-            const recent = this.emails.filter(e => e.is_recent).length;
+            if (!Array.isArray(this.emails)) return;
+
+            const unread = this.emails.filter(e => e && !e.is_seen).length;
+            const recent = this.emails.filter(e => e && e.is_recent).length;
             const statsEl = document.getElementById('email-stats');
 
             if (this.emails.length > 0) {
@@ -804,6 +850,8 @@
         }
 
         setLoading(btn, icon, text, isLoading) {
+            if (!btn || !icon || !text) return;
+
             btn.disabled = isLoading;
             if (isLoading) {
                 icon.innerHTML = '<div class="spinner"></div>';
@@ -816,7 +864,9 @@
 
         showAlert(containerId, type, message, autoHide = 0) {
             const container = document.getElementById(containerId);
-            container.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+            if (!container) return;
+
+            container.innerHTML = `<div class="alert alert-${type}">${this.escapeHtml(message)}</div>`;
 
             if (autoHide > 0) {
                 setTimeout(() => {
@@ -842,6 +892,8 @@
 
             try {
                 const date = new Date(dateStr);
+                if (isNaN(date.getTime())) return dateStr;
+
                 const now = new Date();
                 const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
 
@@ -861,11 +913,13 @@
 
         shortenText(text, maxLength) {
             if (!text) return '';
+            if (typeof text !== 'string') return String(text);
             return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
         }
 
         escapeHtml(text) {
             if (!text) return '';
+            if (typeof text !== 'string') text = String(text);
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
@@ -874,7 +928,9 @@
 
     // Global functions for event handlers
     function closeCompose() {
-        webmail.closeCompose();
+        if (window.webmail) {
+            webmail.closeCompose();
+        }
     }
 
     // Initialize the webmail app

@@ -8,8 +8,9 @@ actix-web = "4.5"
 lettre = { version = "0.10", features = ["smtp-transport", "tokio1-native-tls", "builder"], default-features = false }
 async-imap = "0.10.4"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tokio = { version = "1.38", features = ["full"] }
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono"] }
 dotenv = "0.15"
 actix-cors = "0.7"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }

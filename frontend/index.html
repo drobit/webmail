@@ -1,17 +1,504 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Webmail</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust Webmail</title>
     <style>
-        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
-        .input, .textarea { width: 100%; margin: 10px 0; padding: 8px; }
-        .textarea { height: 100px; }
-        .button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
-        .button:hover { background: #0056b3; }
-        .email-list { list-style: none; padding: 0; }
-        .email-item { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            background: white;
+            border-bottom: 3px solid #667eea;
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        .tab:hover {
+            background: #e9ecef;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            padding: 12px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-weight: 500;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .email-list {
+            list-style: none;
+        }
+
+        .email-item {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
+        }
+
+        .email-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .email-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .email-from {
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .email-subject {
+            font-size: 18px;
+            font-weight: 600;
+            color: #212529;
+            margin-bottom: 10px;
+        }
+
+        .email-body {
+            color: #6c757d;
+            line-height: 1.5;
+            max-height: 100px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .email-body::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 20px;
+            background: linear-gradient(transparent, #f8f9fa);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                border-radius: 8px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .tabs {
+                flex-direction: column;
+            }
+
+            .tab-content {
+                padding: 20px;
+            }
+        }
     </style>
 </head>
 <body>
+<div class="container">
+    <div class="header">
+        <h1>🚀 Rust WASM Webmail</h1>
+        <p>Secure Email Management System</p>
+    </div>
+
+    <div class="tabs">
+        <button id="inbox-tab" class="tab active">📧 Inbox</button>
+        <button id="compose-tab" class="tab">✍️ Compose</button>
+    </div>
+
+    <!-- Inbox Tab -->
+    <div id="inbox" class="tab-content active">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>📬 Your Inbox</h2>
+            <button id="refresh-btn" class="btn">
+                <span id="refresh-text">🔄 Refresh</span>
+            </button>
+        </div>
+
+        <div id="inbox-status"></div>
+        <ul id="email-list" class="email-list"></ul>
+    </div>
+
+    <!-- Compose Tab -->
+    <div id="compose" class="tab-content">
+        <h2>✍️ Compose New Email</h2>
+
+        <form id="email-form">
+            <div class="form-group">
+                <label for="to">To:</label>
+                <input type="email" id="to" class="form-control" placeholder="recipient@example.com" required>
+            </div>
+
+            <div class="form-group">
+                <label for="subject">Subject:</label>
+                <input type="text" id="subject" class="form-control" placeholder="Enter subject" required>
+            </div>
+
+            <div class="form-group">
+                <label for="body">Message:</label>
+                <textarea id="body" class="form-control textarea" placeholder="Write your email here..." required></textarea>
+            </div>
+
+            <button type="submit" class="btn" id="send-btn">
+                <span id="send-text">📤 Send Email</span>
+            </button>
+        </form>
+
+        <div id="send-status"></div>
+    </div>
+</div>
+</body>
+</html>: space-between; align-items: center; margin-bottom: 20px;">
+<h2>📬 Your Inbox</h2>
+<button class="btn" onclick="fetchEmails()">
+    <span id="refresh-text">🔄 Refresh</span>
+</button>
+</div>
+
+<div id="inbox-status"></div>
+<ul id="email-list" class="email-list"></ul>
+</div>
+
+<!-- Compose Tab -->
+<div id="compose" class="tab-content">
+    <h2>✍️ Compose New Email</h2>
+
+    <form id="email-form" onsubmit="sendEmail(event)">
+        <div class="form-group">
+            <label for="to">To:</label>
+            <input type="email" id="to" class="form-control" placeholder="recipient@example.com" required>
+        </div>
+
+        <div class="form-group">
+            <label for="subject">Subject:</label>
+            <input type="text" id="subject" class="form-control" placeholder="Enter subject" required>
+        </div>
+
+        <div class="form-group">
+            <label for="body">Message:</label>
+            <textarea id="body" class="form-control textarea" placeholder="Write your email here..." required></textarea>
+        </div>
+
+        <button type="submit" class="btn" id="send-btn">
+            <span id="send-text">📤 Send Email</span>
+        </button>
+    </form>
+
+    <div id="send-status"></div>
+</div>
+</div>
+
+<script>
+    const API_BASE = 'http://127.0.0.1:3001';
+
+    // Tab Management
+    function showTab(tabName) {
+        // Hide all tab contents
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+
+        // Remove active class from all tabs
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
+
+        // Show selected tab content
+        document.getElementById(tabName).classList.add('active');
+
+        // Add active class to clicked tab
+        event.target.classList.add('active');
+
+        // Auto-fetch emails when switching to inbox
+        if (tabName === 'inbox') {
+            fetchEmails();
+        }
+    }
+
+    // Show status message
+    function showStatus(elementId, message, type) {
+        const statusEl = document.getElementById(elementId);
+        statusEl.innerHTML = `<div class="status ${type}">${message}</div>`;
+
+        if (type === 'success') {
+            setTimeout(() => {
+                statusEl.innerHTML = '';
+            }, 3000);
+        }
+    }
+
+    // Fetch emails from backend
+    async function fetchEmails() {
+        const refreshBtn = document.getElementById('refresh-text');
+        const emailList = document.getElementById('email-list');
+
+        refreshBtn.innerHTML = '<span class="loading-spinner"></span> Loading...';
+        showStatus('inbox-status', '📡 Fetching your emails...', 'loading');
+
+        try {
+            const response = await fetch(`${API_BASE}/fetch`);
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const emails = await response.json();
+
+            refreshBtn.innerHTML = '🔄 Refresh';
+
+            if (emails.length === 0) {
+                emailList.innerHTML = `
+                        <div class="empty-state">
+                            <h3>📭 No emails found</h3>
+                            <p>Your inbox is empty or no emails could be retrieved.</p>
+                        </div>
+                    `;
+                showStatus('inbox-status', '✅ Inbox loaded successfully (empty)', 'success');
+            } else {
+                emailList.innerHTML = emails.map(email => `
+                        <li class="email-item">
+                            <div class="email-header">
+                                <div class="email-from">From: ${escapeHtml(email.from)}</div>
+                            </div>
+                            <div class="email-subject">${escapeHtml(email.subject)}</div>
+                            <div class="email-body">${escapeHtml(email.body.substring(0, 200))}${email.body.length > 200 ? '...' : ''}</div>
+                        </li>
+                    `).join('');
+
+                showStatus('inbox-status', `✅ Successfully loaded ${emails.length} emails`, 'success');
+            }
+        } catch (error) {
+            console.error('Fetch error:', error);
+            refreshBtn.innerHTML = '🔄 Refresh';
+            emailList.innerHTML = `
+                    <div class="empty-state">
+                        <h3>❌ Failed to load emails</h3>
+                        <p>Error: ${error.message}</p>
+                        <p>Make sure your backend is running on port 3001</p>
+                    </div>
+                `;
+            showStatus('inbox-status', `❌ Failed to fetch emails: ${error.message}`, 'error');
+        }
+    }
+
+    // Send email
+    async function sendEmail(event) {
+        event.preventDefault();
+
+        const sendBtn = document.getElementById('send-btn');
+        const sendText = document.getElementById('send-text');
+        const form = document.getElementById('email-form');
+
+        const emailData = {
+            to: document.getElementById('to').value,
+            subject: document.getElementById('subject').value,
+            body: document.getElementById('body').value
+        };
+
+        sendBtn.disabled = true;
+        sendText.innerHTML = '<span class="loading-spinner"></span> Sending...';
+        showStatus('send-status', '📤 Sending your email...', 'loading');
+
+        try {
+            const response = await fetch(`${API_BASE}/send`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(emailData)
+            });
+
+            const result = await response.text();
+
+            if (response.ok) {
+                showStatus('send-status', '✅ Email sent successfully!', 'success');
+                form.reset(); // Clear the form
+            } else {
+                throw new Error(result);
+            }
+        } catch (error) {
+            console.error('Send error:', error);
+            showStatus('send-status', `❌ Failed to send email: ${error.message}`, 'error');
+        } finally {
+            sendBtn.disabled = false;
+            sendText.innerHTML = '📤 Send Email';
+        }
+    }
+
+    // Utility function to escape HTML
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Auto-fetch emails on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        fetchEmails();
+    });
+
+    // Auto-refresh emails every 30 seconds
+    setInterval(fetchEmails, 30000);
+</script>
 </body>
 </html>

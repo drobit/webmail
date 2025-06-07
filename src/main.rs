@@ -12,6 +12,7 @@ use webpki_roots;
 use futures::stream::StreamExt;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
+
 #[derive(Serialize, Deserialize)]
 struct EmailRequest {
     to: String,
@@ -25,6 +26,9 @@ struct Email {
     from: String,
     subject: String,
     body: String,
+    date: Option<String>,
+    is_seen: bool,
+    is_recent: bool,
 }
 
 #[derive(Clone)]
@@ -33,9 +37,7 @@ struct AppState {
 }
 
 async fn init_db() -> PgPool {
-    // Temporarily comment out database connection for testing
     println!("Skipping database connection for now...");
-    // We'll return a dummy pool that we won't actually use
     let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://localhost/dummy".to_string());
     match PgPoolOptions::new()
         .max_connections(1)
@@ -45,7 +47,6 @@ async fn init_db() -> PgPool {
         Ok(pool) => pool,
         Err(e) => {
             println!("Database connection failed (continuing anyway): {:?}", e);
-            // For now, let's panic to see the exact error
             panic!("Database connection failed: {:?}", e);
         }
     }
@@ -61,7 +62,6 @@ async fn send_email(data: web::Json<EmailRequest>, _state: web::Data<AppState>) 
         return HttpResponse::BadRequest().body("SMTP credentials not configured");
     }
 
-    // Remove unused variable
     let email = match Message::builder()
         .from(smtp_user.parse().unwrap())
         .to(data.to.parse().unwrap())
@@ -73,8 +73,6 @@ async fn send_email(data: web::Json<EmailRequest>, _state: web::Data<AppState>) 
     };
 
     let creds = Credentials::new(smtp_user, smtp_pass);
-
-    // Use STARTTLS instead of direct SSL - Gmail uses port 587 with STARTTLS
     let mailer = SmtpTransport::starttls_relay("smtp.gmail.com")
         .unwrap()
         .port(587)
@@ -91,6 +89,114 @@ async fn send_email(data: web::Json<EmailRequest>, _state: web::Data<AppState>) 
             println!("Email send error: {:?}", e);
             HttpResponse::InternalServerError().body(format!("Email send failed: {:?}", e))
         },
+    }
+}
+
+fn decode_mime_encoded_word(encoded: &str) -> String {
+    // Simple decoder for =?charset?encoding?data?= format
+    if encoded.starts_with("=?") && encoded.ends_with("?=") {
+        let parts: Vec<&str> = encoded[2..encoded.len()-2].split('?').collect();
+        if parts.len() == 3 {
+            let _charset = parts[0];
+            let encoding = parts[1].to_uppercase();
+            let data = parts[2];
+
+            match encoding.as_str() {
+                "B" => {
+                    // Base64 decode
+                    use base64::{Engine as _, engine::general_purpose};
+                    if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(data) {
+                        return String::from_utf8_lossy(&decoded_bytes).to_string();
+                    }
+                }
+                "Q" => {
+                    // Quoted-printable decode (simplified)
+                    return data.replace("_", " ");
+                }
+                _ => {}
+            }
+        }
+    }
+    encoded.to_string()
+}
+
+fn clean_email_body(raw_body: &[u8]) -> String {
+    let body_str = String::from_utf8_lossy(raw_body);
+
+    // Try to extract plain text from multipart MIME
+    let lines: Vec<&str> = body_str.lines().collect();
+    let mut in_text_part = false;
+    let mut _in_html_part = false;
+    let mut text_content = Vec::new();
+    let mut current_encoding = "7bit".to_string();
+
+    for line in lines {
+        // Check for content type headers
+        if line.to_lowercase().starts_with("content-type: text/plain") {
+            in_text_part = true;
+            _in_html_part = false;
+            continue;
+        } else if line.to_lowercase().starts_with("content-type: text/html") {
+            in_text_part = false;
+            _in_html_part = true;
+            continue;
+        } else if line.to_lowercase().starts_with("content-type:") && !line.to_lowercase().contains("text/") {
+            in_text_part = false;
+            _in_html_part = false;
+            continue;
+        }
+
+        // Check for content encoding
+        if line.to_lowercase().starts_with("content-transfer-encoding:") {
+            current_encoding = line.split(':').nth(1).unwrap_or("7bit").trim().to_lowercase();
+            continue;
+        }
+
+        // Skip headers and MIME boundaries
+        if line.starts_with("--") || line.contains("Content-") || line.trim().is_empty() {
+            continue;
+        }
+
+        // If we're in a text part, collect the content
+        if in_text_part {
+            let decoded_line = match current_encoding.as_str() {
+                "base64" => {
+                    use base64::{Engine as _, engine::general_purpose};
+                    if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(line.trim()) {
+                        String::from_utf8_lossy(&decoded_bytes).to_string()
+                    } else {
+                        line.to_string()
+                    }
+                }
+                "quoted-printable" => {
+                    // Basic quoted-printable decoding
+                    line.replace("=\r\n", "").replace("=\n", "")
+                }
+                _ => line.to_string()
+            };
+            text_content.push(decoded_line);
+
+            // Limit content length
+            if text_content.join("\n").len() > 500 {
+                break;
+            }
+        }
+    }
+
+    let result = text_content.join("\n").trim().to_string();
+
+    // If no text content found, try to get first few lines of raw content
+    if result.is_empty() {
+        body_str.lines()
+            .filter(|line| !line.starts_with("--") && !line.contains("Content-") && !line.trim().is_empty())
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(200)
+            .collect()
+    } else {
+        result.chars().take(300).collect()
     }
 }
 
@@ -159,15 +265,25 @@ async fn fetch_emails(_state: web::Data<AppState>) -> HttpResponse {
         }
     };
 
-    match imap_session.select("INBOX").await {
-        Ok(_) => println!("INBOX selected successfully"),
+    let mailbox = match imap_session.select("INBOX").await {
+        Ok(mailbox) => {
+            println!("INBOX selected successfully. Messages: {}", mailbox.exists);
+            mailbox
+        },
         Err(e) => {
             println!("Select error: {:?}", e);
             return HttpResponse::InternalServerError().body(format!("Select error: {:?}", e));
         }
     };
 
-    let messages_stream = match imap_session.fetch("1:5", "(FLAGS ENVELOPE BODY[TEXT])").await {
+    // Get the last 20 messages (most recent)
+    let message_count = mailbox.exists;
+    let start_uid = if message_count > 20 { message_count - 19 } else { 1 };
+    let fetch_range = format!("{}:{}", start_uid, message_count);
+
+    println!("Fetching messages: {}", fetch_range);
+
+    let messages_stream = match imap_session.fetch(&fetch_range, "(FLAGS ENVELOPE BODY[TEXT] INTERNALDATE)").await {
         Ok(stream) => {
             println!("Fetch command sent successfully");
             stream
@@ -192,31 +308,29 @@ async fn fetch_emails(_state: web::Data<AppState>) -> HttpResponse {
         println!("Processing message {}", i + 1);
 
         if let Some(envelope) = message.envelope() {
-            let body = message
+            let cleaned_body = message
                 .text()
-                .map(|b: &[u8]| {
-                    let text = String::from_utf8_lossy(b).to_string();
-                    // Truncate long bodies for display
-                    if text.len() > 200 {
-                        format!("{}...", &text[..200])
-                    } else {
-                        text
-                    }
-                })
+                .map(|b: &[u8]| clean_email_body(b))
                 .unwrap_or_default();
 
             let subject = envelope.subject
                 .as_ref()
-                .map(|s| String::from_utf8_lossy(s).to_string())
+                .map(|s| decode_mime_encoded_word(&String::from_utf8_lossy(s)))
                 .unwrap_or("No Subject".to_string());
 
             let from = envelope.from
                 .as_ref()
                 .and_then(|addrs| addrs.first())
                 .map(|addr| {
-                    let name = addr.name.as_ref().map(|n| String::from_utf8_lossy(n)).unwrap_or_default();
-                    let mailbox = addr.mailbox.as_ref().map(|m| String::from_utf8_lossy(m)).unwrap_or_default();
-                    let host = addr.host.as_ref().map(|h| String::from_utf8_lossy(h)).unwrap_or_default();
+                    let name = addr.name.as_ref()
+                        .map(|n| decode_mime_encoded_word(&String::from_utf8_lossy(n)))
+                        .unwrap_or_default();
+                    let mailbox = addr.mailbox.as_ref()
+                        .map(|m| String::from_utf8_lossy(m))
+                        .unwrap_or_default();
+                    let host = addr.host.as_ref()
+                        .map(|h| String::from_utf8_lossy(h))
+                        .unwrap_or_default();
 
                     if !name.is_empty() {
                         format!("{} <{}@{}>", name, mailbox, host)
@@ -226,6 +340,13 @@ async fn fetch_emails(_state: web::Data<AppState>) -> HttpResponse {
                 })
                 .unwrap_or("Unknown".to_string());
 
+            let date = message.internal_date()
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string());
+
+            let flags: Vec<_> = message.flags().collect();
+            let is_seen = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Seen));
+            let is_recent = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Recent));
+
             emails.push(Email {
                 id: envelope.message_id
                     .as_ref()
@@ -233,10 +354,16 @@ async fn fetch_emails(_state: web::Data<AppState>) -> HttpResponse {
                     .unwrap_or_else(|| format!("msg_{}", i)),
                 from,
                 subject,
-                body,
+                body: cleaned_body,
+                date,
+                is_seen,
+                is_recent,
             });
         }
     }
+
+    // Sort by date (newest first) - use message order as proxy since Gmail returns in date order
+    emails.reverse();
 
     if let Err(e) = imap_session.logout().await {
         println!("Logout error (non-fatal): {:?}", e);

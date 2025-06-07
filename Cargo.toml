@@ -17,3 +17,5 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 webpki-roots = "0.26"
 tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }

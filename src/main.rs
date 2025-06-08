@@ -75,11 +75,11 @@ async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -
             let _ = sqlx::query(
                 "INSERT INTO sent_emails (to_address, subject, body) VALUES ($1, $2, $3)",
             )
-                .bind(&data.to)
-                .bind(&data.subject)
-                .bind(&data.body)
-                .execute(&state.db)
-                .await;
+            .bind(&data.to)
+            .bind(&data.subject)
+            .bind(&data.body)
+            .execute(&state.db)
+            .await;
 
             HttpResponse::Ok().body("Email sent successfully!")
         }
@@ -119,9 +119,9 @@ async fn get_cached_emails(pool: &PgPool, limit: i64) -> Result<Vec<EmailListIte
          ORDER BY created_at DESC NULLS LAST
          LIMIT $1",
     )
-        .bind(limit)
-        .fetch_all(pool)
-        .await?;
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
 
     Ok(rows
         .into_iter()
@@ -933,7 +933,7 @@ async fn main() -> std::io::Result<()> {
             .route("/send", web::post().to(send_email))
             .route("/health", web::get().to(health_check))
     })
-        .bind("127.0.0.1:3001")?
-        .run()
-        .await
+    .bind("127.0.0.1:3001")?
+    .run()
+    .await
 }

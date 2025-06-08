@@ -66,7 +66,11 @@ pub fn validate_email_format(email: &str) -> bool {
     }
 
     // Domain should not start or end with dot or hyphen
-    if domain.starts_with('.') || domain.ends_with('.') || domain.starts_with('-') || domain.ends_with('-') {
+    if domain.starts_with('.')
+        || domain.ends_with('.')
+        || domain.starts_with('-')
+        || domain.ends_with('-')
+    {
         return false;
     }
 
@@ -96,7 +100,7 @@ pub fn decode_mime_header_simple(header: &str) -> String {
     if let Some(start) = header.find("=?UTF-8?B?") {
         if let Some(end) = header[start..].find("?=") {
             let encoded = &header[start + 10..start + end];
-            use base64::{Engine as _, engine::general_purpose};
+            use base64::{engine::general_purpose, Engine as _};
             if let Ok(decoded) = general_purpose::STANDARD.decode(encoded) {
                 if let Ok(text) = String::from_utf8(decoded) {
                     return text;
@@ -125,13 +129,22 @@ mod tests {
 
     #[test]
     fn test_format_email_address() {
-        assert_eq!(format_email_address("test@example.com"), "<test@example.com>");
-        assert_eq!(format_email_address("John Doe <john@example.com>"), "John Doe <john@example.com>");
+        assert_eq!(
+            format_email_address("test@example.com"),
+            "<test@example.com>"
+        );
+        assert_eq!(
+            format_email_address("John Doe <john@example.com>"),
+            "John Doe <john@example.com>"
+        );
     }
 
     #[test]
     fn test_extract_domain_from_email() {
-        assert_eq!(extract_domain_from_email("test@example.com"), Some("example.com".to_string()));
+        assert_eq!(
+            extract_domain_from_email("test@example.com"),
+            Some("example.com".to_string())
+        );
         assert_eq!(extract_domain_from_email("invalid-email"), None);
     }
 
@@ -146,14 +159,20 @@ mod tests {
     #[test]
     fn test_truncate_subject() {
         assert_eq!(truncate_subject("Short", 10), "Short");
-        assert_eq!(truncate_subject("This is a very long subject line", 15), "This is a ve...");
+        assert_eq!(
+            truncate_subject("This is a very long subject line", 15),
+            "This is a ve..."
+        );
     }
 
     #[test]
     fn test_decode_mime_header_simple() {
         assert_eq!(decode_mime_header_simple("Simple Header"), "Simple Header");
         // Test basic functionality - actual MIME decoding would need more complex test data
-        assert_eq!(decode_mime_header_simple("No encoding here"), "No encoding here");
+        assert_eq!(
+            decode_mime_header_simple("No encoding here"),
+            "No encoding here"
+        );
     }
 
     #[test]

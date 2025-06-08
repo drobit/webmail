@@ -60,9 +60,7 @@ async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -
         .body(data.body.clone())
     {
         Ok(email) => email,
-        Err(e) => {
-            return HttpResponse::BadRequest().body(format!("Email building error: {:?}", e))
-        }
+        Err(e) => return HttpResponse::BadRequest().body(format!("Email building error: {:?}", e)),
     };
 
     let creds = Credentials::new(smtp_user, smtp_pass);
@@ -106,9 +104,7 @@ async fn update_db_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     }
 
     // Create index on UID for fast lookups (ignore if exists)
-    let _ = sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(imap_uid)",
-    )
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(imap_uid)")
         .execute(pool)
         .await;
 
@@ -276,7 +272,10 @@ async fn batch_fetch_emails_with_bodies(
 
     // CRITICAL: Fetch EVERYTHING in one go - headers AND bodies
     let messages_stream = imap_session
-        .fetch(&fetch_range, "(UID FLAGS INTERNALDATE BODY[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)] BODY[TEXT])")
+        .fetch(
+            &fetch_range,
+            "(UID FLAGS INTERNALDATE BODY[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)] BODY[TEXT])",
+        )
         .await?;
 
     let messages: Vec<_> = messages_stream
@@ -396,9 +395,12 @@ fn extract_multipart_content(content: &str) -> String {
     for line in &lines {
         if line.contains("boundary=") {
             if let Some(boundary_part) = line.split("boundary=").nth(1) {
-                boundary = boundary_part.trim_matches('"').trim_matches('\'').to_string();
+                boundary = boundary_part
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
                 if boundary.starts_with('"') && boundary.ends_with('"') {
-                    boundary = boundary[1..boundary.len()-1].to_string();
+                    boundary = boundary[1..boundary.len() - 1].to_string();
                 }
                 break;
             }
@@ -503,11 +505,15 @@ fn extract_fallback_content(content: &str) -> String {
     }
 
     if readable_lines.is_empty() {
-        "This email contains technical content that cannot be displayed in a readable format.".to_string()
+        "This email contains technical content that cannot be displayed in a readable format."
+            .to_string()
     } else {
         let result = readable_lines.join("\n");
         if result.len() > 1500 {
-            format!("{}...\n\n[Content truncated for readability]", &result[..1500])
+            format!(
+                "{}...\n\n[Content truncated for readability]",
+                &result[..1500]
+            )
         } else {
             result
         }

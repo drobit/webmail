@@ -1,46 +1,21 @@
-use actix_web::{web, App, HttpResponse, HttpServer};
 use actix_cors::Cors;
-use lettre::{Message, SmtpTransport, Transport};
+use actix_web::{web, App, HttpResponse, HttpServer};
+use chrono::Utc;
+use futures::stream::StreamExt;
 use lettre::transport::smtp::authentication::Credentials;
+use lettre::{Message, SmtpTransport, Transport};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, postgres::PgPoolOptions, Row};
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use std::collections::HashMap;
 use std::env;
 use tokio::net::TcpStream;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_rustls::TlsConnector;
-use webpki_roots;
-use futures::stream::StreamExt;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use chrono::Utc;
-use std::collections::HashMap;
+use webpki_roots;
 
-#[derive(Serialize, Deserialize)]
-struct EmailRequest {
-    to: String,
-    subject: String,
-    body: String,
-}
-
-#[derive(Serialize, Clone)]
-struct EmailListItem {
-    id: String,
-    from: String,
-    subject: String,
-    date: Option<String>,
-    is_seen: bool,
-    is_recent: bool,
-}
-
-#[derive(Serialize, Clone)]
-struct EmailDetail {
-    id: String,
-    from: String,
-    subject: String,
-    body: String,
-    date: Option<String>,
-    is_seen: bool,
-    is_recent: bool,
-}
+// Import from lib.rs
+use webmail::{EmailDetail, EmailListItem, EmailRequest};
 
 #[derive(Clone)]
 struct AppState {
@@ -62,7 +37,7 @@ async fn init_db() -> PgPool {
         Ok(pool) => {
             println!("✅ Database connected");
             pool
-        },
+        }
         Err(e) => {
             println!("❌ Database connection failed: {:?}", e);
             println!("📝 Make sure PostgreSQL is running and DATABASE_URL is correct");
@@ -86,7 +61,9 @@ async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -
         .body(data.body.clone())
     {
         Ok(email) => email,
-        Err(e) => return HttpResponse::BadRequest().body(format!("Email building error: {:?}", e)),
+        Err(e) => {
+            return HttpResponse::BadRequest().body(format!("Email building error: {:?}", e))
+        }
     };
 
     let creds = Credentials::new(smtp_user, smtp_pass);
@@ -99,7 +76,7 @@ async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -
     match mailer.send(&email) {
         Ok(_) => {
             let _ = sqlx::query(
-                "INSERT INTO sent_emails (to_address, subject, body) VALUES ($1, $2, $3)"
+                "INSERT INTO sent_emails (to_address, subject, body) VALUES ($1, $2, $3)",
             )
                 .bind(&data.to)
                 .bind(&data.subject)
@@ -108,7 +85,7 @@ async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -
                 .await;
 
             HttpResponse::Ok().body("Email sent successfully!")
-        },
+        }
         Err(e) => HttpResponse::InternalServerError().body(format!("Email send failed: {:?}", e)),
     }
 }
@@ -116,15 +93,13 @@ async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -
 // Modified database schema to include UID for fast access
 async fn update_db_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     // Add UID column if it doesn't exist
-    sqlx::query(
-        "ALTER TABLE emails ADD COLUMN IF NOT EXISTS imap_uid INTEGER"
-    )
+    sqlx::query("ALTER TABLE emails ADD COLUMN IF NOT EXISTS imap_uid INTEGER")
         .execute(pool)
         .await?;
 
     // Create index on UID for fast lookups
     sqlx::query(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_emails_imap_uid ON emails(imap_uid)"
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_emails_imap_uid ON emails(imap_uid)",
     )
         .execute(pool)
         .await?;
@@ -138,45 +113,54 @@ async fn get_cached_emails(pool: &PgPool, limit: i64) -> Result<Vec<EmailListIte
         "SELECT message_id, from_address, subject, created_at, is_seen, is_recent, imap_uid
          FROM emails
          ORDER BY created_at DESC NULLS LAST
-         LIMIT $1"
+         LIMIT $1",
     )
         .bind(limit)
         .fetch_all(pool)
         .await?;
 
-    Ok(rows.into_iter().map(|row| {
-        let created_at: Option<chrono::DateTime<chrono::Utc>> = row.get("created_at");
-        let is_recent: bool = row.get::<Option<bool>, _>("is_recent").unwrap_or(false);
-        let is_seen: bool = row.get::<Option<bool>, _>("is_seen").unwrap_or(true);
-        let imap_uid: Option<i32> = row.get("imap_uid");
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let created_at: Option<chrono::DateTime<chrono::Utc>> = row.get("created_at");
+            let is_recent: bool = row.get::<Option<bool>, _>("is_recent").unwrap_or(false);
+            let is_seen: bool = row.get::<Option<bool>, _>("is_seen").unwrap_or(true);
+            let imap_uid: Option<i32> = row.get("imap_uid");
 
-        // Use UID-based ID for faster access
-        let id = if let Some(uid) = imap_uid {
-            format!("uid_{}", uid)
-        } else {
-            row.get::<Option<String>, _>("message_id").unwrap_or_else(|| "unknown".to_string())
-        };
+            // Use UID-based ID for faster access
+            let id = if let Some(uid) = imap_uid {
+                format!("uid_{}", uid)
+            } else {
+                row.get::<Option<String>, _>("message_id")
+                    .unwrap_or_else(|| "unknown".to_string())
+            };
 
-        EmailListItem {
-            id,
-            from: row.get("from_address"),
-            subject: row.get::<Option<String>, _>("subject").unwrap_or_else(|| "No Subject".to_string()),
-            date: created_at.map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string()),
-            is_seen,
-            is_recent,
-        }
-    }).collect())
+            EmailListItem {
+                id,
+                from: row.get("from_address"),
+                subject: row
+                    .get::<Option<String>, _>("subject")
+                    .unwrap_or_else(|| "No Subject".to_string()),
+                date: created_at.map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string()),
+                is_seen,
+                is_recent,
+            }
+        })
+        .collect())
 }
 
 // Get email detail with UID support
-async fn get_email_detail(pool: &PgPool, message_id: &str) -> Result<Option<EmailDetail>, sqlx::Error> {
+async fn get_email_detail(
+    pool: &PgPool,
+    message_id: &str,
+) -> Result<Option<EmailDetail>, sqlx::Error> {
     let query = if message_id.starts_with("uid_") {
         // Fast UID-based lookup
         if let Ok(uid) = message_id[4..].parse::<i32>() {
             sqlx::query(
                 "SELECT message_id, from_address, subject, body, created_at, is_seen, is_recent, imap_uid
                  FROM emails
-                 WHERE imap_uid = $1"
+                 WHERE imap_uid = $1",
             )
                 .bind(uid)
                 .fetch_optional(pool)
@@ -189,7 +173,7 @@ async fn get_email_detail(pool: &PgPool, message_id: &str) -> Result<Option<Emai
         sqlx::query(
             "SELECT message_id, from_address, subject, body, created_at, is_seen, is_recent, imap_uid
              FROM emails
-             WHERE message_id = $1"
+             WHERE message_id = $1",
         )
             .bind(message_id)
             .fetch_optional(pool)
@@ -205,14 +189,19 @@ async fn get_email_detail(pool: &PgPool, message_id: &str) -> Result<Option<Emai
         let id = if let Some(uid) = imap_uid {
             format!("uid_{}", uid)
         } else {
-            row.get::<Option<String>, _>("message_id").unwrap_or_else(|| "unknown".to_string())
+            row.get::<Option<String>, _>("message_id")
+                .unwrap_or_else(|| "unknown".to_string())
         };
 
         Ok(Some(EmailDetail {
             id,
             from: row.get("from_address"),
-            subject: row.get::<Option<String>, _>("subject").unwrap_or_else(|| "No Subject".to_string()),
-            body: row.get::<Option<String>, _>("body").unwrap_or_else(|| "Click to load content...".to_string()),
+            subject: row
+                .get::<Option<String>, _>("subject")
+                .unwrap_or_else(|| "No Subject".to_string()),
+            body: row
+                .get::<Option<String>, _>("body")
+                .unwrap_or_else(|| "Click to load content...".to_string()),
             date: created_at.map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string()),
             is_seen,
             is_recent,
@@ -223,7 +212,9 @@ async fn get_email_detail(pool: &PgPool, message_id: &str) -> Result<Option<Emai
 }
 
 // BATCH fetch with full email content - one connection, multiple emails
-async fn batch_fetch_emails_with_bodies(limit: u32) -> Result<Vec<EmailDetail>, Box<dyn std::error::Error + Send + Sync>> {
+async fn batch_fetch_emails_with_bodies(
+    limit: u32,
+) -> Result<Vec<EmailDetail>, Box<dyn std::error::Error + Send + Sync>> {
     println!("🚀 BATCH fetching {} emails with bodies", limit);
     let start_time = std::time::Instant::now();
 
@@ -247,7 +238,9 @@ async fn batch_fetch_emails_with_bodies(limit: u32) -> Result<Vec<EmailDetail>, 
 
     let compat_stream = tls_stream.compat();
     let client = async_imap::Client::new(compat_stream);
-    let mut imap_session = client.login(&imap_user, &imap_pass).await
+    let mut imap_session = client
+        .login(&imap_user, &imap_pass)
+        .await
         .map_err(|e| format!("IMAP login failed: {:?}", e))?;
 
     println!("✅ Connected in {:?}", start_time.elapsed());
@@ -261,10 +254,17 @@ async fn batch_fetch_emails_with_bodies(limit: u32) -> Result<Vec<EmailDetail>, 
     }
 
     let fetch_limit = limit.min(15); // Reasonable limit for batch
-    let start_uid = if message_count > fetch_limit { message_count - fetch_limit + 1 } else { 1 };
+    let start_uid = if message_count > fetch_limit {
+        message_count - fetch_limit + 1
+    } else {
+        1
+    };
     let fetch_range = format!("{}:{}", start_uid, message_count);
 
-    println!("📦 BATCH fetching range: {} ({} emails)", fetch_range, fetch_limit);
+    println!(
+        "📦 BATCH fetching range: {} ({} emails)",
+        fetch_range, fetch_limit
+    );
 
     // CRITICAL: Fetch EVERYTHING in one go - headers AND bodies
     let messages_stream = imap_session
@@ -279,7 +279,11 @@ async fn batch_fetch_emails_with_bodies(limit: u32) -> Result<Vec<EmailDetail>, 
         .filter_map(Result::ok)
         .collect();
 
-    println!("📦 BATCH fetched {} messages in {:?}", messages.len(), start_time.elapsed());
+    println!(
+        "📦 BATCH fetched {} messages in {:?}",
+        messages.len(),
+        start_time.elapsed()
+    );
 
     let mut emails = Vec::with_capacity(messages.len());
     let now = Utc::now();
@@ -298,7 +302,10 @@ async fn batch_fetch_emails_with_bodies(limit: u32) -> Result<Vec<EmailDetail>, 
                 if line_lower.starts_with("from:") && from == "Unknown" {
                     from = line[5..].trim().chars().take(50).collect();
                 } else if line_lower.starts_with("subject:") && subject == "No Subject" {
-                    subject = decode_mime_header_simple(line[8..].trim()).chars().take(80).collect();
+                    subject = webmail::decode_mime_header_simple(line[8..].trim())
+                        .chars()
+                        .take(80)
+                        .collect();
                 } else if line_lower.starts_with("message-id:") {
                     message_id = line[11..].trim().to_string();
                 }
@@ -306,16 +313,21 @@ async fn batch_fetch_emails_with_bodies(limit: u32) -> Result<Vec<EmailDetail>, 
         }
 
         // Extract body text
-        let body = message.text()
+        let body = message
+            .text()
             .map(|b| extract_body_content(b))
             .unwrap_or_else(|| "No content available".to_string());
 
-        let date = message.internal_date()
+        let date = message
+            .internal_date()
             .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string());
 
         let flags: Vec<_> = message.flags().collect();
-        let is_seen = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Seen));
-        let is_recent = message.internal_date()
+        let is_seen = flags
+            .iter()
+            .any(|f| matches!(f, async_imap::types::Flag::Seen));
+        let is_recent = message
+            .internal_date()
             .map(|dt| now.signed_duration_since(dt).num_hours() < 24)
             .unwrap_or(false);
 
@@ -333,29 +345,12 @@ async fn batch_fetch_emails_with_bodies(limit: u32) -> Result<Vec<EmailDetail>, 
     let _ = imap_session.logout().await;
     emails.reverse();
 
-    println!("🚀 BATCH completed {} emails in {:?}", emails.len(), start_time.elapsed());
+    println!(
+        "🚀 BATCH completed {} emails in {:?}",
+        emails.len(),
+        start_time.elapsed()
+    );
     Ok(emails)
-}
-
-// Simple MIME decoding
-fn decode_mime_header_simple(header: &str) -> String {
-    if !header.contains("=?") {
-        return header.to_string();
-    }
-
-    if let Some(start) = header.find("=?UTF-8?B?") {
-        if let Some(end) = header[start..].find("?=") {
-            let encoded = &header[start + 10..start + end];
-            use base64::{Engine as _, engine::general_purpose};
-            if let Ok(decoded) = general_purpose::STANDARD.decode(encoded) {
-                if let Ok(text) = String::from_utf8(decoded) {
-                    return text;
-                }
-            }
-        }
-    }
-
-    header.to_string()
 }
 
 // Better content extraction with proper decoding
@@ -366,10 +361,11 @@ fn extract_body_content(raw_body: &[u8]) -> String {
     let decoded_content = decode_email_content(&body_str);
 
     // Check if it's HTML content
-    if decoded_content.to_lowercase().contains("<html") ||
-        decoded_content.to_lowercase().contains("<!doctype") ||
-        decoded_content.contains("<div") ||
-        decoded_content.contains("<p>") {
+    if decoded_content.to_lowercase().contains("<html")
+        || decoded_content.to_lowercase().contains("<!doctype")
+        || decoded_content.contains("<div")
+        || decoded_content.contains("<p>")
+    {
         return extract_html_content(&decoded_content);
     }
 
@@ -383,7 +379,7 @@ fn decode_email_content(content: &str) -> String {
     let mut decoded_lines = Vec::new();
     let mut current_encoding = "7bit";
     let mut in_headers = true;
-    let mut charset = "utf-8";
+    let _charset = "utf-8";
 
     for line in &lines {
         let line_lower = line.to_lowercase();
@@ -402,7 +398,7 @@ fn decode_email_content(content: &str) -> String {
 
             if line_lower.starts_with("content-type:") && line_lower.contains("charset=") {
                 if let Some(charset_part) = line_lower.split("charset=").nth(1) {
-                    charset = charset_part.split(';').next().unwrap_or("utf-8").trim();
+                    let _charset = charset_part.split(';').next().unwrap_or("utf-8").trim();
                 }
                 continue;
             }
@@ -417,17 +413,15 @@ fn decode_email_content(content: &str) -> String {
         // Decode based on encoding
         let decoded_line = match current_encoding.to_lowercase().as_str() {
             "base64" => {
-                use base64::{Engine as _, engine::general_purpose};
+                use base64::{engine::general_purpose, Engine as _};
                 if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(line.trim()) {
                     String::from_utf8_lossy(&decoded_bytes).to_string()
                 } else {
                     line.to_string()
                 }
-            },
-            "quoted-printable" => {
-                decode_quoted_printable(line)
-            },
-            _ => line.to_string()
+            }
+            "quoted-printable" => decode_quoted_printable(line),
+            _ => line.to_string(),
         };
 
         // Only add lines with actual content
@@ -576,15 +570,17 @@ fn extract_plain_text(body: &str) -> String {
         let trimmed = line.trim();
 
         // Skip empty lines and technical content
-        if trimmed.is_empty() ||
-            trimmed.starts_with("--") ||
-            trimmed.to_lowercase().contains("content-") ||
-            trimmed.len() < 3 {
+        if trimmed.is_empty()
+            || trimmed.starts_with("--")
+            || trimmed.to_lowercase().contains("content-")
+            || trimmed.len() < 3
+        {
             continue;
         }
 
         // Check if line contains readable text (not just encoded garbage)
-        let readable_chars = trimmed.chars()
+        let readable_chars = trimmed
+            .chars()
             .filter(|c| c.is_alphabetic() || c.is_whitespace() || ".,!?-()[]{}:;\"'".contains(*c))
             .count();
 
@@ -644,12 +640,13 @@ async fn cache_emails_with_uid(pool: &PgPool, emails: &[EmailDetail]) -> Result<
 }
 
 async fn fetch_emails(
-    query: web::Query<std::collections::HashMap<String, String>>,
-    state: web::Data<AppState>
+    query: web::Query<HashMap<String, String>>,
+    state: web::Data<AppState>,
 ) -> HttpResponse {
     println!("📧 Email list requested");
 
-    let limit = query.get("limit")
+    let limit = query
+        .get("limit")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(50)
         .min(50);
@@ -662,7 +659,7 @@ async fn fetch_emails(
             Ok(cached_emails) if !cached_emails.is_empty() => {
                 println!("⚡ INSTANT: Serving {} cached emails", cached_emails.len());
                 return HttpResponse::Ok().json(cached_emails);
-            },
+            }
             _ => {}
         }
     }
@@ -680,43 +677,42 @@ async fn fetch_emails(
                 }
             });
 
-            let email_list: Vec<EmailListItem> = emails.into_iter().map(|email| {
-                EmailListItem {
+            let email_list: Vec<EmailListItem> = emails
+                .into_iter()
+                .map(|email| EmailListItem {
                     id: email.id,
                     from: email.from,
                     subject: email.subject,
                     date: email.date,
                     is_seen: email.is_seen,
                     is_recent: email.is_recent,
-                }
-            }).collect();
+                })
+                .collect();
 
             HttpResponse::Ok().json(email_list)
-        },
+        }
         Err(e) => {
             // Fallback to cache if IMAP fails
             match get_cached_emails(&state.db, limit).await {
                 Ok(cached_emails) if !cached_emails.is_empty() => {
                     println!("📄 Serving cached emails as fallback");
                     HttpResponse::Ok().json(cached_emails)
-                },
-                _ => HttpResponse::InternalServerError().body(format!("Failed to fetch emails: {}", e))
+                }
+                _ => HttpResponse::InternalServerError()
+                    .body(format!("Failed to fetch emails: {}", e)),
             }
         }
     }
 }
 
 async fn check_new_emails(
-    _query: web::Query<std::collections::HashMap<String, String>>,
-    _state: web::Data<AppState>
+    _query: web::Query<HashMap<String, String>>,
+    _state: web::Data<AppState>,
 ) -> HttpResponse {
     HttpResponse::Ok().json(Vec::<EmailListItem>::new())
 }
 
-async fn get_email(
-    path: web::Path<String>,
-    state: web::Data<AppState>
-) -> HttpResponse {
+async fn get_email(path: web::Path<String>, state: web::Data<AppState>) -> HttpResponse {
     let message_id = path.into_inner();
     println!("📖 Email requested: {}", message_id);
 
@@ -733,10 +729,8 @@ async fn get_email(
             let mut email_with_loading = email;
             email_with_loading.body = "Loading email content...".to_string();
             HttpResponse::Ok().json(email_with_loading)
-        },
-        Ok(None) => {
-            HttpResponse::NotFound().body("Email not found")
-        },
+        }
+        Ok(None) => HttpResponse::NotFound().body("Email not found"),
         Err(e) => HttpResponse::InternalServerError().body(format!("Database error: {:?}", e)),
     }
 }

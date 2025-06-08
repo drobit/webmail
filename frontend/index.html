@@ -240,6 +240,16 @@
             line-height: 1.6;
             white-space: pre-wrap;
             color: #444;
+            word-wrap: break-word;
+        }
+
+        .preview-body.technical-content {
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            color: #666;
         }
 
         .empty-preview {
@@ -413,6 +423,16 @@
             border: 1px solid #bee5eb;
         }
 
+        .content-warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+        }
+
         @media (max-width: 768px) {
             .sidebar {
                 display: none;
@@ -535,7 +555,7 @@
             this.emails = [];
             this.selectedEmail = null;
             this.emailLimit = 50;
-            this.isLoading = false; // Add loading state
+            this.isLoading = false;
 
             this.init();
         }
@@ -583,7 +603,7 @@
         }
 
         async loadEmails(forceRefresh = false) {
-            if (this.isLoading) return; // Prevent multiple simultaneous requests
+            if (this.isLoading) return;
 
             this.isLoading = true;
             const refreshBtn = document.getElementById('refresh-btn');
@@ -608,7 +628,6 @@
 
                 const emailData = await response.json();
 
-                // Validate response data
                 if (Array.isArray(emailData)) {
                     this.emails = emailData;
                     this.renderEmailList();
@@ -629,10 +648,9 @@
         }
 
         async checkNewEmails() {
-            if (this.isLoading) return; // Don't check while loading
+            if (this.isLoading) return;
 
             try {
-                // Get the latest email date to check for newer ones
                 const latestDate = this.emails.length > 0 ? this.emails[0].date : null;
                 const url = latestDate
                     ? `${this.apiBase}/emails/new?since=${encodeURIComponent(latestDate)}`
@@ -644,15 +662,12 @@
                 const newEmails = await response.json();
 
                 if (Array.isArray(newEmails) && newEmails.length > 0) {
-                    // Prepend new emails to the beginning of the list
                     this.emails = [...newEmails, ...this.emails];
                     this.renderEmailList();
                     this.updateStats();
 
-                    // Show notification
                     this.showAlert('email-alerts', 'success', `📧 ${newEmails.length} new email(s) received!`, 3000);
 
-                    // Optional: Play a notification sound or show browser notification
                     if (Notification.permission === 'granted') {
                         new Notification(`You have ${newEmails.length} new email(s)`, {
                             icon: '📧',
@@ -662,7 +677,6 @@
                 }
             } catch (error) {
                 console.error('Check new emails error:', error);
-                // Silent fail for background check
             }
         }
 
@@ -675,7 +689,6 @@
             }
 
             const emailsHtml = this.emails.map((email, index) => {
-                // Validate email object
                 if (!email || typeof email !== 'object') {
                     return '';
                 }
@@ -693,7 +706,7 @@
                         <div class="email-date">${this.formatDate(email.date)}</div>
                     </li>
                 `;
-            }).filter(html => html).join(''); // Filter out empty strings
+            }).filter(html => html).join('');
 
             listContainer.innerHTML = emailsHtml;
         }
@@ -710,18 +723,15 @@
         async selectEmail(emailId) {
             if (this.isLoading || !emailId) return;
 
-            // Remove previous selection
             document.querySelectorAll('.email-item').forEach(item => {
                 item.classList.remove('selected');
             });
 
-            // Add selection to clicked item
             const emailItem = document.querySelector(`[data-email-id="${emailId}"]`);
             if (emailItem) {
                 emailItem.classList.add('selected');
             }
 
-            // Show loading in preview panel
             const previewPanel = document.getElementById('email-preview');
             previewPanel.innerHTML = `
                 <div class="empty-preview">
@@ -742,7 +752,6 @@
                 const email = await response.json();
                 this.renderEmailPreview(email);
 
-                // Mark as read in local data
                 const emailIndex = this.emails.findIndex(e => e.id === emailId);
                 if (emailIndex !== -1) {
                     this.emails[emailIndex].is_seen = true;
@@ -761,7 +770,6 @@
                 `;
             }
 
-            // Show preview panel on mobile
             if (window.innerWidth <= 768) {
                 previewPanel.classList.add('show');
             }
@@ -777,6 +785,20 @@
                 return;
             }
 
+            // Clean and format the email body
+            let emailBody = email.body || 'No content';
+            let bodyClass = 'preview-body';
+            let contentWarning = '';
+
+            // Check if this looks like technical/MIME content
+            if (this.isTechnicalContent(emailBody)) {
+                emailBody = this.cleanComplexEmailContent(emailBody);
+                if (emailBody.includes('technical content')) {
+                    bodyClass += ' technical-content';
+                    contentWarning = '<div class="content-warning">⚠️ This email contains technical content that has been simplified for display.</div>';
+                }
+            }
+
             const previewPanel = document.getElementById('email-preview');
             previewPanel.innerHTML = `
                 <div class="preview-header">
@@ -784,8 +806,132 @@
                     <div class="preview-subject">${this.escapeHtml(email.subject || 'No Subject')}</div>
                     <div class="preview-date">${this.formatDate(email.date)}</div>
                 </div>
-                <div class="preview-body">${this.escapeHtml(email.body || 'No content')}</div>
+                ${contentWarning}
+                <div class="${bodyClass}">${this.escapeHtml(emailBody)}</div>
             `;
+        }
+
+        isTechnicalContent(content) {
+            const technicalIndicators = [
+                'Content-Type:',
+                'boundary=',
+                'multipart/',
+                'MIME-Version',
+                /^[0-9a-fA-F]{20,}/m,  // Long hex strings
+                /--[0-9a-fA-F]{10,}/,   // MIME boundaries
+            ];
+
+            return technicalIndicators.some(indicator => {
+                if (typeof indicator === 'string') {
+                    return content.includes(indicator);
+                } else {
+                    return indicator.test(content);
+                }
+            });
+        }
+
+        cleanComplexEmailContent(content) {
+            // Remove technical headers and MIME boundaries
+            const lines = content.split('\n');
+            const cleanLines = [];
+            let foundReadableContent = false;
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+
+                // Skip empty lines
+                if (!trimmed) continue;
+
+                // Skip technical content
+                if (trimmed.startsWith('Content-') ||
+                    trimmed.startsWith('MIME-') ||
+                    trimmed.startsWith('--') ||
+                    trimmed.includes('boundary=') ||
+                    /^[0-9a-fA-F]{30,}$/.test(trimmed) ||
+                    trimmed.startsWith('=?') ||
+                    trimmed.startsWith('Return-Path:') ||
+                    trimmed.startsWith('Received:')) {
+                    continue;
+                }
+
+                // Look for actual message content
+                if (trimmed.length > 10) {
+                    // Clean common email encoding artifacts
+                    let cleaned = trimmed
+                        .replace(/=20/g, ' ')
+                        .replace(/=\r?\n/g, '')
+                        .replace(/=3D/g, '=')
+                        .replace(/=2E/g, '.')
+                        .replace(/=22/g, '"')
+                        .replace(/=27/g, "'")
+                        .replace(/=([0-9A-Fa-f]{2})/g, (match, hex) => {
+                            try {
+                                return String.fromCharCode(parseInt(hex, 16));
+                            } catch (e) {
+                                return match;
+                            }
+                        });
+
+                    // Check if this line has readable content
+                    const readableChars = cleaned.match(/[a-zA-Z\s]/g);
+                    const totalChars = cleaned.length;
+
+                    if (readableChars && (readableChars.length / totalChars) > 0.5 && cleaned.length > 5) {
+                        cleanLines.push(cleaned);
+                        foundReadableContent = true;
+                    }
+                }
+
+                // Stop if we have enough content
+                if (cleanLines.join(' ').length > 1500) {
+                    break;
+                }
+            }
+
+            if (!foundReadableContent || cleanLines.length === 0) {
+                // Try to extract any meaningful text from the original content
+                const meaningfulText = this.extractMeaningfulText(content);
+                return meaningfulText || 'This email contains technical content that cannot be displayed in a readable format.';
+            }
+
+            let result = cleanLines.join('\n');
+            if (result.length > 2000) {
+                result = result.substring(0, 2000) + '...\n\n[Content truncated for readability]';
+            }
+
+            return result;
+        }
+
+        extractMeaningfulText(content) {
+            // Look for common patterns in bounce/error messages
+            const patterns = [
+                /Address not found[^.]*\./gi,
+                /delivery.*failed?[^.]*\./gi,
+                /message.*not.*delivered?[^.]*\./gi,
+                /DNS.*error[^.]*\./gi,
+                /domain.*not.*found[^.]*\./gi,
+                /recipient.*address.*rejected[^.]*\./gi,
+            ];
+
+            const matches = [];
+            patterns.forEach(pattern => {
+                const found = content.match(pattern);
+                if (found) {
+                    matches.push(...found);
+                }
+            });
+
+            if (matches.length > 0) {
+                return matches.join(' ').replace(/\s+/g, ' ').trim();
+            }
+
+            // Fallback: look for any sentence-like structures
+            const sentences = content.match(/[A-Z][^.!?]*[.!?]/g);
+            if (sentences && sentences.length > 0) {
+                return sentences.slice(0, 3).join(' ');
+            }
+
+            return null;
         }
 
         updateStats() {

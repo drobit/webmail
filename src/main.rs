@@ -4,7 +4,6 @@ use chrono::Utc;
 use futures::stream::StreamExt;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
-use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::collections::HashMap;
 use std::env;
@@ -92,17 +91,26 @@ async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -
 
 // Modified database schema to include UID for fast access
 async fn update_db_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
-    // Add UID column if it doesn't exist
-    sqlx::query("ALTER TABLE emails ADD COLUMN IF NOT EXISTS imap_uid INTEGER")
-        .execute(pool)
-        .await?;
+    // Add missing columns if they don't exist
+    let schema_updates = [
+        "ALTER TABLE emails ADD COLUMN IF NOT EXISTS imap_uid INTEGER",
+        "ALTER TABLE emails ADD COLUMN IF NOT EXISTS is_seen BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE emails ADD COLUMN IF NOT EXISTS is_recent BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE emails ADD COLUMN IF NOT EXISTS body_preview TEXT",
+    ];
 
-    // Create index on UID for fast lookups
-    sqlx::query(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_emails_imap_uid ON emails(imap_uid)",
+    for update in &schema_updates {
+        if let Err(e) = sqlx::query(update).execute(pool).await {
+            println!("⚠️ Schema update warning: {} - {}", update, e);
+        }
+    }
+
+    // Create index on UID for fast lookups (ignore if exists)
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(imap_uid)",
     )
         .execute(pool)
-        .await?;
+        .await;
 
     Ok(())
 }
@@ -290,7 +298,6 @@ async fn batch_fetch_emails_with_bodies(
 
     for message in messages.iter() {
         let uid = message.uid.unwrap_or(0);
-        let mut message_id = format!("uid_{}", uid);
         let mut from = "Unknown".to_string();
         let mut subject = "No Subject".to_string();
 
@@ -306,8 +313,6 @@ async fn batch_fetch_emails_with_bodies(
                         .chars()
                         .take(80)
                         .collect();
-                } else if line_lower.starts_with("message-id:") {
-                    message_id = line[11..].trim().to_string();
                 }
             }
         }
@@ -357,6 +362,11 @@ async fn batch_fetch_emails_with_bodies(
 fn extract_body_content(raw_body: &[u8]) -> String {
     let body_str = String::from_utf8_lossy(raw_body);
 
+    // Handle multipart emails (like the delivery failure notification)
+    if body_str.contains("Content-Type: multipart/") {
+        return extract_multipart_content(&body_str);
+    }
+
     // First, try to detect and handle different content encodings
     let decoded_content = decode_email_content(&body_str);
 
@@ -371,6 +381,137 @@ fn extract_body_content(raw_body: &[u8]) -> String {
 
     // Plain text processing
     extract_plain_text(&decoded_content)
+}
+
+// Handle multipart email content
+fn extract_multipart_content(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut result = Vec::new();
+    let mut in_text_part = false;
+    let mut in_html_part = false;
+    let mut current_content = Vec::new();
+    let mut boundary = String::new();
+
+    // Find the boundary
+    for line in &lines {
+        if line.contains("boundary=") {
+            if let Some(boundary_part) = line.split("boundary=").nth(1) {
+                boundary = boundary_part.trim_matches('"').trim_matches('\'').to_string();
+                if boundary.starts_with('"') && boundary.ends_with('"') {
+                    boundary = boundary[1..boundary.len()-1].to_string();
+                }
+                break;
+            }
+        }
+    }
+
+    if boundary.is_empty() {
+        return extract_plain_text(content);
+    }
+
+    for line in lines {
+        // Check for boundary markers
+        if line.contains(&boundary) {
+            // Process accumulated content
+            if in_text_part || in_html_part {
+                let content_str = current_content.join("\n");
+                if in_html_part {
+                    result.push(extract_html_content(&content_str));
+                } else {
+                    result.push(extract_plain_text(&content_str));
+                }
+                current_content.clear();
+            }
+            in_text_part = false;
+            in_html_part = false;
+            continue;
+        }
+
+        // Check content type headers
+        let line_lower = line.to_lowercase();
+        if line_lower.starts_with("content-type:") {
+            if line_lower.contains("text/plain") {
+                in_text_part = true;
+                in_html_part = false;
+            } else if line_lower.contains("text/html") {
+                in_html_part = true;
+                in_text_part = false;
+            }
+            continue;
+        }
+
+        // Skip other headers in parts
+        if line.starts_with("Content-") || line.starts_with("MIME-") {
+            continue;
+        }
+
+        // Collect content if we're in a text or HTML part
+        if (in_text_part || in_html_part) && !line.trim().is_empty() {
+            current_content.push(line.to_string());
+        }
+    }
+
+    // Process any remaining content
+    if !current_content.is_empty() && (in_text_part || in_html_part) {
+        let content_str = current_content.join("\n");
+        if in_html_part {
+            result.push(extract_html_content(&content_str));
+        } else {
+            result.push(extract_plain_text(&content_str));
+        }
+    }
+
+    if result.is_empty() {
+        // Fallback: try to extract any readable text
+        extract_fallback_content(content)
+    } else {
+        result.join("\n\n---\n\n")
+    }
+}
+
+// Fallback content extraction for complex emails
+fn extract_fallback_content(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut readable_lines = Vec::new();
+
+    for line in lines {
+        let trimmed = line.trim();
+
+        // Skip technical lines
+        if trimmed.is_empty()
+            || trimmed.starts_with("--")
+            || trimmed.starts_with("Content-")
+            || trimmed.starts_with("MIME-")
+            || trimmed.len() < 10
+            || trimmed.chars().filter(|c| c.is_ascii_hexdigit()).count() > trimmed.len() / 2
+        {
+            continue;
+        }
+
+        // Look for lines with actual readable content
+        let word_chars = trimmed.chars().filter(|c| c.is_alphabetic()).count();
+        let total_chars = trimmed.chars().count();
+
+        if total_chars > 0 && (word_chars as f32 / total_chars as f32) > 0.3 {
+            readable_lines.push(trimmed.to_string());
+
+            // Stop if we have enough content
+            if readable_lines.join(" ").len() > 1000 {
+                break;
+            }
+        }
+    }
+
+    if readable_lines.is_empty() {
+        "This email contains technical content that cannot be displayed in a readable format.".to_string()
+    } else {
+        let result = readable_lines.join("\n");
+        if result.len() > 1500 {
+            format!("{}...\n\n[Content truncated for readability]", &result[..1500])
+        } else {
+            result
+        }
+    }
 }
 
 // Decode email content handling various encodings

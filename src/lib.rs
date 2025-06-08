@@ -42,7 +42,42 @@ pub fn extract_domain_from_email(email: &str) -> Option<String> {
 }
 
 pub fn validate_email_format(email: &str) -> bool {
-    email.contains('@') && email.contains('.') && email.len() > 5
+    // Basic email validation
+    if !email.contains('@') || email.len() < 5 {
+        return false;
+    }
+
+    let parts: Vec<&str> = email.split('@').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+
+    let local = parts[0];
+    let domain = parts[1];
+
+    // Local part validation
+    if local.is_empty() || local.len() > 64 {
+        return false;
+    }
+
+    // Domain part validation
+    if domain.is_empty() || domain.len() > 253 || !domain.contains('.') {
+        return false;
+    }
+
+    // Domain should not start or end with dot or hyphen
+    if domain.starts_with('.') || domain.ends_with('.') || domain.starts_with('-') || domain.ends_with('-') {
+        return false;
+    }
+
+    // Check for valid characters (basic check)
+    for c in email.chars() {
+        if !c.is_ascii_alphanumeric() && !"._-@".contains(c) {
+            return false;
+        }
+    }
+
+    true
 }
 
 pub fn truncate_subject(subject: &str, max_length: usize) -> String {

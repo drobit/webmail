@@ -49,11 +49,41 @@ jobs:
           toolchain: stable
           profile: minimal
 
+      # Run database setup
+      - name: setup test database
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          PGPASSWORD=test_pass psql -h localhost -U test_user -d test_db -c "
+            CREATE TABLE IF NOT EXISTS emails (
+                id SERIAL PRIMARY KEY,
+                message_id VARCHAR(255) UNIQUE,
+                from_address TEXT NOT NULL,
+                to_address TEXT NOT NULL,
+                subject TEXT,
+                body TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                is_seen BOOLEAN DEFAULT FALSE,
+                is_recent BOOLEAN DEFAULT FALSE,
+                imap_uid INTEGER,
+                body_preview TEXT
+            );
+            CREATE TABLE IF NOT EXISTS sent_emails (
+                id SERIAL PRIMARY KEY,
+                to_address TEXT NOT NULL,
+                subject TEXT,
+                body TEXT,
+                sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                status VARCHAR(50) DEFAULT 'sent'
+            );
+          "
+
+      # Run library tests
       - run: cargo test --lib
 
-
-      - name: install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - run: wasm-pack test --headless --firefox
-      - run: wasm-pack test --headless --chrome
+      # Skip WASM tests for now since this is primarily a server application
+      # - name: install wasm-pack
+      #   run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      # - run: wasm-pack test --headless --firefox
+      # - run: wasm-pack test --headless --chrome

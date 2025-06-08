@@ -3,6 +3,14 @@ name = "webmail"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "webmail"
+path = "src/main.rs"
+
+[lib]
+name = "webmail"
+path = "src/lib.rs"
+
 [dependencies]
 actix-web = "4.5"
 lettre = { version = "0.10", features = ["smtp-transport", "tokio1-native-tls", "builder"], default-features = false }

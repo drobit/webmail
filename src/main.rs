@@ -1,6 +1,6 @@
 // src/main.rs
 use actix_cors::Cors;
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, middleware::Logger};
+use actix_web::{middleware::Logger, web, App, HttpRequest, HttpResponse, HttpServer};
 use chrono::Utc;
 use futures::stream::StreamExt;
 use lettre::transport::smtp::authentication::Credentials;
@@ -16,7 +16,7 @@ use webpki_roots;
 
 // Import auth module
 mod auth;
-use auth::{SessionStore, get_user_session, get_user_credentials};
+use auth::{get_user_credentials, get_user_session, SessionStore};
 
 // Import from lib.rs
 use webmail::{EmailDetail, EmailListItem, EmailRequest};
@@ -52,20 +52,23 @@ async fn init_db() -> PgPool {
 }
 
 // Authentication middleware - requires valid session for email endpoints
-fn require_auth(req: &HttpRequest, session_store: &SessionStore) -> Result<auth::UserSession, HttpResponse> {
+fn require_auth(
+    req: &HttpRequest,
+    session_store: &SessionStore,
+) -> Result<auth::UserSession, HttpResponse> {
     match get_user_session(req, session_store) {
         Some(session) => Ok(session),
         None => Err(HttpResponse::Unauthorized().json(serde_json::json!({
             "error": "Authentication required",
             "redirect": "/login.html"
-        })))
+        }))),
     }
 }
 
 async fn send_email(
     req: HttpRequest,
     data: web::Json<EmailRequest>,
-    state: web::Data<AppState>
+    state: web::Data<AppState>,
 ) -> HttpResponse {
     // Authenticate user
     let user_session = match require_auth(&req, &state.session_store) {
@@ -75,7 +78,9 @@ async fn send_email(
 
     let (smtp_user, smtp_pass) = match get_user_credentials(&user_session) {
         Ok(creds) => creds,
-        Err(e) => return HttpResponse::InternalServerError().body(format!("Credential error: {}", e)),
+        Err(e) => {
+            return HttpResponse::InternalServerError().body(format!("Credential error: {}", e))
+        }
     };
 
     let email = match Message::builder()
@@ -110,11 +115,11 @@ async fn send_email(
             let _ = sqlx::query(
                 "INSERT INTO sent_emails (to_address, subject, body) VALUES ($1, $2, $3)",
             )
-                .bind(&data.to)
-                .bind(&data.subject)
-                .bind(&data.body)
-                .execute(&state.db)
-                .await;
+            .bind(&data.to)
+            .bind(&data.subject)
+            .bind(&data.body)
+            .execute(&state.db)
+            .await;
 
             HttpResponse::Ok().body("Email sent successfully!")
         }
@@ -157,7 +162,7 @@ async fn update_db_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
 async fn get_cached_emails(
     pool: &PgPool,
     user_email: &str,
-    limit: i64
+    limit: i64,
 ) -> Result<Vec<EmailListItem>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT message_id, from_address, subject, created_at, is_seen, is_recent, imap_uid
@@ -166,10 +171,10 @@ async fn get_cached_emails(
          ORDER BY created_at DESC NULLS LAST
          LIMIT $2",
     )
-        .bind(user_email)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?;
+    .bind(user_email)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
 
     Ok(rows
         .into_iter()
@@ -268,7 +273,10 @@ async fn batch_fetch_emails_with_bodies(
     user_session: &auth::UserSession,
     limit: u32,
 ) -> Result<Vec<EmailDetail>, Box<dyn std::error::Error + Send + Sync>> {
-    println!("🚀 BATCH fetching {} emails for {}", limit, user_session.email);
+    println!(
+        "🚀 BATCH fetching {} emails for {}",
+        limit, user_session.email
+    );
     let start_time = std::time::Instant::now();
 
     let (imap_user, imap_pass) = get_user_credentials(user_session)?;
@@ -280,7 +288,8 @@ async fn batch_fetch_emails_with_bodies(
         .with_no_client_auth();
     let connector = TlsConnector::from(std::sync::Arc::new(config));
 
-    let tcp_stream = TcpStream::connect((user_session.imap_server.as_str(), user_session.imap_port)).await?;
+    let tcp_stream =
+        TcpStream::connect((user_session.imap_server.as_str(), user_session.imap_port)).await?;
     let tls_stream = connector
         .connect(
             rustls::pki_types::ServerName::try_from(user_session.imap_server.as_str())?.to_owned(),
@@ -313,7 +322,10 @@ async fn batch_fetch_emails_with_bodies(
     };
     let fetch_range = format!("{}:{}", start_uid, message_count);
 
-    println!("📦 BATCH fetching range: {} ({} emails)", fetch_range, fetch_limit);
+    println!(
+        "📦 BATCH fetching range: {} ({} emails)",
+        fetch_range, fetch_limit
+    );
 
     let messages_stream = imap_session
         .fetch(
@@ -330,7 +342,11 @@ async fn batch_fetch_emails_with_bodies(
         .filter_map(Result::ok)
         .collect();
 
-    println!("📦 BATCH fetched {} messages in {:?}", messages.len(), start_time.elapsed());
+    println!(
+        "📦 BATCH fetched {} messages in {:?}",
+        messages.len(),
+        start_time.elapsed()
+    );
 
     let mut emails = Vec::with_capacity(messages.len());
     let now = Utc::now();
@@ -387,7 +403,11 @@ async fn batch_fetch_emails_with_bodies(
     let _ = imap_session.logout().await;
     emails.reverse();
 
-    println!("🚀 BATCH completed {} emails in {:?}", emails.len(), start_time.elapsed());
+    println!(
+        "🚀 BATCH completed {} emails in {:?}",
+        emails.len(),
+        start_time.elapsed()
+    );
     Ok(emails)
 }
 
@@ -395,7 +415,7 @@ async fn batch_fetch_emails_with_bodies(
 async fn cache_emails_with_uid(
     pool: &PgPool,
     user_email: &str,
-    emails: &[EmailDetail]
+    emails: &[EmailDetail],
 ) -> Result<(), sqlx::Error> {
     for email in emails {
         let uid = if email.id.starts_with("uid_") {
@@ -487,16 +507,13 @@ async fn fetch_emails(
 
             HttpResponse::Ok().json(email_list)
         }
-        Err(e) => {
-            match get_cached_emails(&state.db, &user_session.email, limit).await {
-                Ok(cached_emails) if !cached_emails.is_empty() => {
-                    println!("📄 Serving cached emails as fallback");
-                    HttpResponse::Ok().json(cached_emails)
-                }
-                _ => HttpResponse::InternalServerError()
-                    .body(format!("Failed to fetch emails: {}", e)),
+        Err(e) => match get_cached_emails(&state.db, &user_session.email, limit).await {
+            Ok(cached_emails) if !cached_emails.is_empty() => {
+                println!("📄 Serving cached emails as fallback");
+                HttpResponse::Ok().json(cached_emails)
             }
-        }
+            _ => HttpResponse::InternalServerError().body(format!("Failed to fetch emails: {}", e)),
+        },
     }
 }
 
@@ -517,7 +534,7 @@ async fn check_new_emails(
 async fn get_email(
     req: HttpRequest,
     path: web::Path<String>,
-    state: web::Data<AppState>
+    state: web::Data<AppState>,
 ) -> HttpResponse {
     // Authenticate user
     let user_session = match require_auth(&req, &state.session_store) {
@@ -526,7 +543,10 @@ async fn get_email(
     };
 
     let message_id = path.into_inner();
-    println!("📖 Email requested: {} for {}", message_id, user_session.email);
+    println!(
+        "📖 Email requested: {} for {}",
+        message_id, user_session.email
+    );
 
     match get_email_detail(&state.db, &user_session.email, &message_id).await {
         Ok(Some(email)) => {
@@ -770,30 +790,197 @@ async fn serve_login_page() -> HttpResponse {
         .body(login_html)
 }
 
-// Serve main app (only if authenticated)
+// Serve main app (redirect to login if not authenticated)
 async fn serve_main_app(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
-    // Check if user is authenticated
-    if get_user_session(&req, &state.session_store).is_some() {
-        // Simple main app HTML - in production, serve the actual index.html file
-        let main_html = r#"<!DOCTYPE html>
-<html><head><title>Webmail</title></head>
-<body><h1>Webmail App Loading...</h1>
-<script>
-// Check authentication and load main app
-const token = localStorage.getItem('webmail_session');
-if (!token) {
-    window.location.href = '/login.html';
-} else {
-    // In production, load the full frontend
-    document.body.innerHTML = '<p>✅ Authenticated! Full app would load here.</p><p><a href="/login.html" onclick="localStorage.removeItem(\'webmail_session\')">Logout</a></p>';
-}
-</script></body></html>"#;
+    // Always check authentication via session token from headers first
+    if let Some(session) = get_user_session(&req, &state.session_store) {
+        // User is authenticated, serve main app
+        let main_html = format!(
+            r#"<!DOCTYPE html>
+<html><head><title>Webmail - {}</title>
+<style>
+body {{ font-family: system-ui, sans-serif; padding: 2rem; background: #f5f5f5; margin: 0; }}
+.container {{ max-width: 800px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+.header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid #eee; padding-bottom: 1rem; }}
+.user-info {{ font-size: 0.9rem; color: #666; }}
+.logout-btn {{ background: #dc3545; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }}
+.logout-btn:hover {{ background: #c82333; }}
+.status {{ padding: 1rem; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724; margin-bottom: 1rem; }}
+.btn {{ background: #007bff; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 4px; cursor: pointer; margin: 0.5rem; }}
+.btn:hover {{ background: #0056b3; }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }}
+.card {{ background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border: 1px solid #dee2e6; }}
+.card h3 {{ margin: 0 0 1rem 0; color: #495057; }}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1>📧 Webmail Dashboard</h1>
+<div>
+<span class="user-info">Logged in as: <strong>{}</strong></span>
+<button class="logout-btn" onclick="logout()">🚪 Logout</button>
+</div>
+</div>
+<div class="status">✅ Authentication successful! Welcome to your secure webmail interface.</div>
 
-        HttpResponse::Ok()
-            .content_type("text/html")
-            .body(main_html)
+<div class="grid">
+<div class="card">
+<h3>📬 Your Emails</h3>
+<p>Access and manage your email messages</p>
+<button class="btn" onclick="testEmailList()">View Emails</button>
+</div>
+<div class="card">
+<h3>📤 Send Email</h3>
+<p>Compose and send new messages</p>
+<button class="btn" onclick="testSend()">Send Test Email</button>
+</div>
+<div class="card">
+<h3>🔧 System Status</h3>
+<p>Check server and session health</p>
+<button class="btn" onclick="showHealth()">Health Check</button>
+</div>
+<div class="card">
+<h3>👥 Sessions</h3>
+<p>View active user sessions</p>
+<button class="btn" onclick="showSessions()">View Sessions</button>
+</div>
+</div>
+
+<div id="test-results" style="margin-top: 2rem; padding: 1rem; background: #f8f9fa; border-radius: 4px; display: none;">
+<h3>Results:</h3>
+<pre id="results-content" style="background: white; padding: 1rem; border-radius: 4px; overflow-x: auto;"></pre>
+</div>
+</div>
+
+<script>
+const API_BASE = 'http://127.0.0.1:3001';
+
+async function makeAuthRequest(url, options = {{}}) {{
+    const token = localStorage.getItem('webmail_session');
+    if (!token) {{
+        window.location.href = '/login.html';
+        return;
+    }}
+
+    const response = await fetch(url, {{
+        ...options,
+        headers: {{
+            'Authorization': 'Bearer ' + token,
+            ...options.headers
+        }}
+    }});
+
+    if (response.status === 401) {{
+        localStorage.removeItem('webmail_session');
+        window.location.href = '/login.html';
+        return;
+    }}
+
+    return response;
+}}
+
+async function logout() {{
+    try {{
+        await makeAuthRequest('/auth/logout', {{ method: 'POST' }});
+    }} catch (error) {{
+        console.error('Logout error:', error);
+    }}
+    localStorage.removeItem('webmail_session');
+    window.location.href = '/login.html';
+}}
+
+async function testEmailList() {{
+    const results = document.getElementById('test-results');
+    const content = document.getElementById('results-content');
+
+    try {{
+        const response = await makeAuthRequest('/emails?limit=5');
+        const data = await response.json();
+
+        content.textContent = `Email List (${data.length} emails):\n\n` + JSON.stringify(data, null, 2);
+        results.style.display = 'block';
+    }} catch (error) {{
+        content.textContent = 'Error fetching emails: ' + error.message;
+        results.style.display = 'block';
+    }}
+}}
+
+async function testSend() {{
+    const to = prompt('Send test email to (email address):');
+    if (!to) return;
+
+    const results = document.getElementById('test-results');
+    const content = document.getElementById('results-content');
+
+    try {{
+        const response = await makeAuthRequest('/send', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{
+                to: to,
+                subject: 'Test Email from Secure Webmail',
+                body: `Hello!
+
+This is a test email sent from your authenticated webmail system.
+
+✅ Authentication: Working
+📧 Email delivery: Testing
+🔒 Security: Enabled
+
+Best regards,
+Your Webmail System`
+            }})
+        }});
+
+        const result = await response.text();
+        content.textContent = `Send Email Result:\n\n${result}`;
+        results.style.display = 'block';
+    }} catch (error) {{
+        content.textContent = 'Error sending email: ' + error.message;
+        results.style.display = 'block';
+    }}
+}}
+
+async function showHealth() {{
+    const results = document.getElementById('test-results');
+    const content = document.getElementById('results-content');
+
+    try {{
+        const response = await fetch('/health');
+        const data = await response.json();
+
+        content.textContent = 'System Health:\n\n' + JSON.stringify(data, null, 2);
+        results.style.display = 'block';
+    }} catch (error) {{
+        content.textContent = 'Error checking health: ' + error.message;
+        results.style.display = 'block';
+    }}
+}}
+
+async function showSessions() {{
+    const results = document.getElementById('test-results');
+    const content = document.getElementById('results-content');
+
+    try {{
+        const response = await makeAuthRequest('/auth/sessions');
+        const data = await response.json();
+
+        content.textContent = 'Active Sessions:\n\n' + JSON.stringify(data, null, 2);
+        results.style.display = 'block';
+    }} catch (error) {{
+        content.textContent = 'Error fetching sessions: ' + error.message;
+        results.style.display = 'block';
+    }}
+}}
+</script>
+</body></html>"#,
+            session.email, session.email
+        );
+
+        HttpResponse::Ok().content_type("text/html").body(main_html)
     } else {
-        // Redirect to login
+        // User is not authenticated, always redirect to login
         HttpResponse::Found()
             .append_header(("Location", "/login.html"))
             .finish()
@@ -1205,9 +1392,15 @@ async fn main() -> std::io::Result<()> {
             .route("/auth/login", web::post().to(auth::login_handler))
             .route("/auth/verify", web::get().to(auth::verify_handler))
             .route("/auth/logout", web::post().to(auth::logout_handler))
-            .route("/auth/provider/{provider}", web::get().to(auth::provider_config_handler))
+            .route(
+                "/auth/provider/{provider}",
+                web::get().to(auth::provider_config_handler),
+            )
             .route("/auth/sessions", web::get().to(auth::list_sessions_handler))
-            .route("/auth/cleanup", web::post().to(auth::cleanup_sessions_handler))
+            .route(
+                "/auth/cleanup",
+                web::post().to(auth::cleanup_sessions_handler),
+            )
             // Email routes (require authentication)
             .route("/emails", web::get().to(fetch_emails))
             .route("/emails/new", web::get().to(check_new_emails))
@@ -1218,7 +1411,7 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(serve_main_app))
             .route("/health", web::get().to(health_check))
     })
-        .bind("127.0.0.1:3001")?
-        .run()
-        .await
+    .bind("127.0.0.1:3001")?
+    .run()
+    .await
 }

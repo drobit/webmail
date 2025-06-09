@@ -1,6 +1,7 @@
 // src/auth.rs
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{Duration, Utc};
+use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -8,7 +9,6 @@ use tokio::net::TcpStream;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_rustls::TlsConnector;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use lettre::transport::smtp::authentication::Credentials;
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -70,7 +70,11 @@ fn decrypt_password(encrypted: &str) -> Result<String, Box<dyn std::error::Error
 // Generate secure session token
 fn generate_session_token() -> String {
     use sha2::{Digest, Sha256};
-    let random_data = format!("{}{}", Utc::now().timestamp_nanos_opt().unwrap_or(0), rand::random::<u64>());
+    let random_data = format!(
+        "{}{}",
+        Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        rand::random::<u64>()
+    );
     let mut hasher = Sha256::new();
     hasher.update(random_data.as_bytes());
     format!("{:x}", hasher.finalize())
@@ -188,7 +192,9 @@ pub async fn login_handler(
         login_req.imap_port,
         &login_req.email,
         &login_req.password,
-    ).await {
+    )
+    .await
+    {
         return HttpResponse::Unauthorized().json(LoginResponse {
             success: false,
             session_token: None,
@@ -202,7 +208,9 @@ pub async fn login_handler(
         login_req.smtp_port,
         &login_req.email,
         &login_req.password,
-    ).await {
+    )
+    .await
+    {
         return HttpResponse::Unauthorized().json(LoginResponse {
             success: false,
             session_token: None,
@@ -239,7 +247,8 @@ pub async fn login_handler(
             // Remove oldest sessions
             let mut sessions: Vec<_> = store.iter().collect();
             sessions.sort_by_key(|(_, session)| session.last_used);
-            let to_remove: Vec<String> = sessions.iter()
+            let to_remove: Vec<String> = sessions
+                .iter()
                 .take(store.len() - 100)
                 .map(|(token, _)| token.to_string())
                 .collect();
@@ -315,10 +324,7 @@ pub async fn logout_handler(
 }
 
 // Middleware to extract user session from request
-pub fn get_user_session(
-    req: &HttpRequest,
-    session_store: &SessionStore,
-) -> Option<UserSession> {
+pub fn get_user_session(req: &HttpRequest, session_store: &SessionStore) -> Option<UserSession> {
     let auth_header = req.headers().get("Authorization")?;
     let auth_str = auth_header.to_str().ok()?;
     let token = auth_str.strip_prefix("Bearer ")?;
@@ -394,12 +400,11 @@ pub async fn provider_config_handler(path: web::Path<String>) -> HttpResponse {
 }
 
 // Session management endpoints
-pub async fn list_sessions_handler(
-    session_store: web::Data<SessionStore>,
-) -> HttpResponse {
+pub async fn list_sessions_handler(session_store: web::Data<SessionStore>) -> HttpResponse {
     let store = session_store.lock().unwrap();
     let session_count = store.len();
-    let active_users: Vec<String> = store.values()
+    let active_users: Vec<String> = store
+        .values()
         .map(|session| session.email.clone())
         .collect();
 
@@ -410,9 +415,7 @@ pub async fn list_sessions_handler(
 }
 
 // Cleanup old sessions (can be called periodically)
-pub async fn cleanup_sessions_handler(
-    session_store: web::Data<SessionStore>,
-) -> HttpResponse {
+pub async fn cleanup_sessions_handler(session_store: web::Data<SessionStore>) -> HttpResponse {
     let mut store = session_store.lock().unwrap();
     let initial_count = store.len();
 

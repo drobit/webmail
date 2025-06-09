@@ -115,11 +115,11 @@ async fn send_email(
             let _ = sqlx::query(
                 "INSERT INTO sent_emails (to_address, subject, body) VALUES ($1, $2, $3)",
             )
-            .bind(&data.to)
-            .bind(&data.subject)
-            .bind(&data.body)
-            .execute(&state.db)
-            .await;
+                .bind(&data.to)
+                .bind(&data.subject)
+                .bind(&data.body)
+                .execute(&state.db)
+                .await;
 
             HttpResponse::Ok().body("Email sent successfully!")
         }
@@ -171,10 +171,10 @@ async fn get_cached_emails(
          ORDER BY created_at DESC NULLS LAST
          LIMIT $2",
     )
-    .bind(user_email)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
+        .bind(user_email)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
 
     Ok(rows
         .into_iter()
@@ -585,391 +585,34 @@ async fn health_check(state: web::Data<AppState>) -> HttpResponse {
     HttpResponse::Ok().json(response)
 }
 
-// Serve login page
+// Login page handler
 async fn serve_login_page() -> HttpResponse {
-    // Login page HTML content
-    let login_html = r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Webmail Login</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 1rem;
-        }
-        .login-container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-            width: 100%;
-            max-width: 420px;
-            overflow: hidden;
-        }
-        .login-header {
-            background: #f8f9fa;
-            padding: 2rem;
-            text-align: center;
-            border-bottom: 1px solid #e9ecef;
-        }
-        .login-header h1 {
-            font-size: 1.5rem;
-            color: #333;
-            margin-bottom: 0.5rem;
-        }
-        .login-header p {
-            color: #666;
-            font-size: 0.9rem;
-        }
-        .login-form {
-            padding: 2rem;
-        }
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-        .form-label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-weight: 500;
-            color: #333;
-            font-size: 0.9rem;
-        }
-        .form-control {
-            width: 100%;
-            padding: 0.75rem;
-            border: 2px solid #e9ecef;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            transition: border-color 0.3s, box-shadow 0.3s;
-        }
-        .form-control:focus {
-            outline: none;
-            border-color: #007bff;
-            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
-        }
-        .login-btn {
-            width: 100%;
-            padding: 0.75rem;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        .login-btn:hover:not(:disabled) {
-            background: #0056b3;
-        }
-        .login-btn:disabled {
-            background: #6c757d;
-            cursor: not-allowed;
-        }
-        .alert {
-            padding: 0.75rem;
-            margin-bottom: 1rem;
-            border-radius: 6px;
-            font-size: 0.85rem;
-        }
-        .alert-danger {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .help-text {
-            font-size: 0.75rem;
-            color: #666;
-            margin-top: 0.25rem;
-        }
-    </style>
-</head>
-<body>
-    <div class="login-container">
-        <div class="login-header">
-            <h1>📧 Webmail</h1>
-            <p>Sign in to access your emails</p>
-        </div>
-
-        <form id="login-form" class="login-form">
-            <div id="login-alerts"></div>
-
-            <div class="form-group">
-                <label class="form-label" for="email">Email Address</label>
-                <input type="email" id="email" class="form-control" placeholder="your.email@example.com" required>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="password">Password / App Password</label>
-                <input type="password" id="password" class="form-control" placeholder="Enter your password" required>
-                <div class="help-text">For Gmail, use an App Password instead of your regular password</div>
-            </div>
-
-            <button type="submit" id="login-btn" class="login-btn">
-                🔐 Sign In
-            </button>
-        </form>
-    </div>
-
-    <script>
-        document.getElementById('login-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            const loginBtn = document.getElementById('login-btn');
-
-            loginBtn.disabled = true;
-            loginBtn.textContent = 'Connecting...';
-
-            try {
-                // Determine provider and settings
-                let provider = 'custom';
-                let imap_server = 'imap.gmail.com';
-                let imap_port = 993;
-                let smtp_server = 'smtp.gmail.com';
-                let smtp_port = 587;
-
-                if (email.includes('@gmail.com')) {
-                    provider = 'gmail';
-                } else if (email.includes('@outlook.com') || email.includes('@hotmail.com')) {
-                    provider = 'outlook';
-                    imap_server = 'outlook.office365.com';
-                    smtp_server = 'smtp-mail.outlook.com';
-                }
-
-                const response = await fetch('/auth/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email,
-                        password,
-                        imap_server,
-                        imap_port,
-                        smtp_server,
-                        smtp_port,
-                        provider
-                    })
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    localStorage.setItem('webmail_session', result.session_token);
-                    window.location.href = '/';
-                } else {
-                    throw new Error(result.error || 'Login failed');
-                }
-
-            } catch (error) {
-                document.getElementById('login-alerts').innerHTML =
-                    `<div class="alert alert-danger">${error.message}</div>`;
-            } finally {
-                loginBtn.disabled = false;
-                loginBtn.textContent = '🔐 Sign In';
-            }
-        });
-    </script>
-</body>
-</html>"#;
+    // Read the login.html file content from the frontend directory
+    let login_html = include_str!("../frontend/login.html");
 
     HttpResponse::Ok()
         .content_type("text/html")
         .body(login_html)
 }
 
-// Serve main app (redirect to login if not authenticated)
-async fn serve_main_app(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
-    // Always check authentication via session token from headers first
-    if let Some(session) = get_user_session(&req, &state.session_store) {
+// Main webmail app handler
+async fn serve_webmail_app() -> HttpResponse {
+    // Read the index.html file content from the frontend directory
+    let app_html = include_str!("../frontend/index.html");
+
+    HttpResponse::Ok()
+        .content_type("text/html")
+        .body(app_html)
+}
+
+// Root handler - redirects based on authentication
+async fn root_handler(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
+    // Check if user has valid session
+    if let Some(_session) = get_user_session(&req, &state.session_store) {
         // User is authenticated, serve main app
-        let user_email = &session.email;
-        let main_html = format!(
-            r#"<!DOCTYPE html>
-<html><head><title>Webmail - {user_email}</title>
-<style>
-body {{ font-family: system-ui, sans-serif; padding: 2rem; background: #f5f5f5; margin: 0; }}
-.container {{ max-width: 800px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-.header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid #eee; padding-bottom: 1rem; }}
-.user-info {{ font-size: 0.9rem; color: #666; }}
-.logout-btn {{ background: #dc3545; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }}
-.logout-btn:hover {{ background: #c82333; }}
-.status {{ padding: 1rem; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724; margin-bottom: 1rem; }}
-.btn {{ background: #007bff; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 4px; cursor: pointer; margin: 0.5rem; }}
-.btn:hover {{ background: #0056b3; }}
-.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }}
-.card {{ background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border: 1px solid #dee2e6; }}
-.card h3 {{ margin: 0 0 1rem 0; color: #495057; }}
-</style>
-</head>
-<body>
-<div class="container">
-<div class="header">
-<h1>📧 Webmail Dashboard</h1>
-<div>
-<span class="user-info">Logged in as: <strong>{user_email}</strong></span>
-<button class="logout-btn" onclick="logout()">🚪 Logout</button>
-</div>
-</div>
-<div class="status">✅ Authentication successful! Welcome to your secure webmail interface.</div>
-
-<div class="grid">
-<div class="card">
-<h3>📬 Your Emails</h3>
-<p>Access and manage your email messages</p>
-<button class="btn" onclick="testEmailList()">View Emails</button>
-</div>
-<div class="card">
-<h3>📤 Send Email</h3>
-<p>Compose and send new messages</p>
-<button class="btn" onclick="testSend()">Send Test Email</button>
-</div>
-<div class="card">
-<h3>🔧 System Status</h3>
-<p>Check server and session health</p>
-<button class="btn" onclick="showHealth()">Health Check</button>
-</div>
-<div class="card">
-<h3>👥 Sessions</h3>
-<p>View active user sessions</p>
-<button class="btn" onclick="showSessions()">View Sessions</button>
-</div>
-</div>
-
-<div id="test-results" style="margin-top: 2rem; padding: 1rem; background: #f8f9fa; border-radius: 4px; display: none;">
-<h3>Results:</h3>
-<pre id="results-content" style="background: white; padding: 1rem; border-radius: 4px; overflow-x: auto;"></pre>
-</div>
-</div>
-
-<script>
-async function makeAuthRequest(url, options) {{
-    const token = localStorage.getItem('webmail_session');
-    if (!token) {{
-        window.location.href = '/login.html';
-        return;
-    }}
-
-    const requestOptions = options || {{}};
-    requestOptions.headers = requestOptions.headers || {{}};
-    requestOptions.headers['Authorization'] = 'Bearer ' + token;
-
-    const response = await fetch(url, requestOptions);
-
-    if (response.status === 401) {{
-        localStorage.removeItem('webmail_session');
-        window.location.href = '/login.html';
-        return;
-    }}
-
-    return response;
-}}
-
-async function logout() {{
-    try {{
-        await makeAuthRequest('/auth/logout', {{ method: 'POST' }});
-    }} catch (error) {{
-        console.error('Logout error:', error);
-    }}
-    localStorage.removeItem('webmail_session');
-    window.location.href = '/login.html';
-}}
-
-async function testEmailList() {{
-    const results = document.getElementById('test-results');
-    const content = document.getElementById('results-content');
-
-    try {{
-        const response = await makeAuthRequest('/emails?limit=5');
-        const data = await response.json();
-
-        content.textContent = 'Email List (' + data.length + ' emails):\\n\\n' + JSON.stringify(data, null, 2);
-        results.style.display = 'block';
-    }} catch (error) {{
-        content.textContent = 'Error fetching emails: ' + error.message;
-        results.style.display = 'block';
-    }}
-}}
-
-async function testSend() {{
-    const to = prompt('Send test email to (email address):');
-    if (!to) return;
-
-    const results = document.getElementById('test-results');
-    const content = document.getElementById('results-content');
-
-    const emailBody = 'Hello!\\n\\nThis is a test email sent from your authenticated webmail system.\\n\\n✅ Authentication: Working\\n📧 Email delivery: Testing\\n🔒 Security: Enabled\\n\\nBest regards,\\nYour Webmail System';
-
-    try {{
-        const response = await makeAuthRequest('/send', {{
-            method: 'POST',
-            headers: {{ 'Content-Type': 'application/json' }},
-            body: JSON.stringify({{
-                to: to,
-                subject: 'Test Email from Secure Webmail',
-                body: emailBody
-            }})
-        }});
-
-        const result = await response.text();
-        content.textContent = 'Send Email Result:\\n\\n' + result;
-        results.style.display = 'block';
-    }} catch (error) {{
-        content.textContent = 'Error sending email: ' + error.message;
-        results.style.display = 'block';
-    }}
-}}
-
-async function showHealth() {{
-    const results = document.getElementById('test-results');
-    const content = document.getElementById('results-content');
-
-    try {{
-        const response = await fetch('/health');
-        const data = await response.json();
-
-        content.textContent = 'System Health:\\n\\n' + JSON.stringify(data, null, 2);
-        results.style.display = 'block';
-    }} catch (error) {{
-        content.textContent = 'Error checking health: ' + error.message;
-        results.style.display = 'block';
-    }}
-}}
-
-async function showSessions() {{
-    const results = document.getElementById('test-results');
-    const content = document.getElementById('results-content');
-
-    try {{
-        const response = await makeAuthRequest('/auth/sessions');
-        const data = await response.json();
-
-        content.textContent = 'Active Sessions:\\n\\n' + JSON.stringify(data, null, 2);
-        results.style.display = 'block';
-    }} catch (error) {{
-        content.textContent = 'Error fetching sessions: ' + error.message;
-        results.style.display = 'block';
-    }}
-}}
-</script>
-</body></html>"#
-        );
-
-        HttpResponse::Ok().content_type("text/html").body(main_html)
+        serve_webmail_app().await
     } else {
-        // User is not authenticated, always redirect to login
+        // User is not authenticated, redirect to login
         HttpResponse::Found()
             .append_header(("Location", "/login.html"))
             .finish()
@@ -1343,6 +986,7 @@ fn extract_plain_text(body: &str) -> String {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
+    env_logger::init();
 
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -1365,15 +1009,24 @@ async fn main() -> std::io::Result<()> {
 
     println!("🌐 Server starting on http://127.0.0.1:3001");
     println!("🔐 Authentication Features:");
-    println!("   🔑 Login page with credential testing");
+    println!("   🔑 Login page at /login.html");
     println!("   🛡️ Session-based authentication");
     println!("   👤 Per-user email isolation");
     println!("   📧 Multiple email provider support");
     println!("   🔒 Secure credential storage");
+    println!("   🏠 Main app at / (redirects to login if not authenticated)");
 
     HttpServer::new(move || {
+        let cors = Cors::default()
+            .allowed_origin("http://127.0.0.1:8080")
+            .allowed_origin("http://localhost:8080")
+            .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+            .allowed_headers(vec!["Content-Type", "Authorization"])
+            .supports_credentials()
+            .max_age(3600);
+
         App::new()
-            .wrap(Cors::permissive())
+            .wrap(cors)
             .wrap(Logger::default())
             .app_data(state.clone())
             .app_data(web::Data::new(session_store.clone()))
@@ -1397,10 +1050,10 @@ async fn main() -> std::io::Result<()> {
             .route("/send", web::post().to(send_email))
             // Static routes
             .route("/login.html", web::get().to(serve_login_page))
-            .route("/", web::get().to(serve_main_app))
+            .route("/", web::get().to(root_handler))
             .route("/health", web::get().to(health_check))
     })
-    .bind("127.0.0.1:3001")?
-    .run()
-    .await
+        .bind("127.0.0.1:3001")?
+        .run()
+        .await
 }

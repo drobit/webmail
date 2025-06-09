@@ -795,9 +795,10 @@ async fn serve_main_app(req: HttpRequest, state: web::Data<AppState>) -> HttpRes
     // Always check authentication via session token from headers first
     if let Some(session) = get_user_session(&req, &state.session_store) {
         // User is authenticated, serve main app
+        let user_email = &session.email;
         let main_html = format!(
             r#"<!DOCTYPE html>
-<html><head><title>Webmail - {}</title>
+<html><head><title>Webmail - {user_email}</title>
 <style>
 body {{ font-family: system-ui, sans-serif; padding: 2rem; background: #f5f5f5; margin: 0; }}
 .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
@@ -818,7 +819,7 @@ body {{ font-family: system-ui, sans-serif; padding: 2rem; background: #f5f5f5; 
 <div class="header">
 <h1>📧 Webmail Dashboard</h1>
 <div>
-<span class="user-info">Logged in as: <strong>{}</strong></span>
+<span class="user-info">Logged in as: <strong>{user_email}</strong></span>
 <button class="logout-btn" onclick="logout()">🚪 Logout</button>
 </div>
 </div>
@@ -854,22 +855,18 @@ body {{ font-family: system-ui, sans-serif; padding: 2rem; background: #f5f5f5; 
 </div>
 
 <script>
-const API_BASE = 'http://127.0.0.1:3001';
-
-async function makeAuthRequest(url, options = {{}}) {{
+async function makeAuthRequest(url, options) {{
     const token = localStorage.getItem('webmail_session');
     if (!token) {{
         window.location.href = '/login.html';
         return;
     }}
 
-    const response = await fetch(url, {{
-        ...options,
-        headers: {{
-            'Authorization': 'Bearer ' + token,
-            ...options.headers
-        }}
-    }});
+    const requestOptions = options || {{}};
+    requestOptions.headers = requestOptions.headers || {{}};
+    requestOptions.headers['Authorization'] = 'Bearer ' + token;
+
+    const response = await fetch(url, requestOptions);
 
     if (response.status === 401) {{
         localStorage.removeItem('webmail_session');
@@ -898,7 +895,7 @@ async function testEmailList() {{
         const response = await makeAuthRequest('/emails?limit=5');
         const data = await response.json();
 
-        content.textContent = `Email List (${data.length} emails):\n\n` + JSON.stringify(data, null, 2);
+        content.textContent = 'Email List (' + data.length + ' emails):\\n\\n' + JSON.stringify(data, null, 2);
         results.style.display = 'block';
     }} catch (error) {{
         content.textContent = 'Error fetching emails: ' + error.message;
@@ -913,6 +910,8 @@ async function testSend() {{
     const results = document.getElementById('test-results');
     const content = document.getElementById('results-content');
 
+    const emailBody = 'Hello!\\n\\nThis is a test email sent from your authenticated webmail system.\\n\\n✅ Authentication: Working\\n📧 Email delivery: Testing\\n🔒 Security: Enabled\\n\\nBest regards,\\nYour Webmail System';
+
     try {{
         const response = await makeAuthRequest('/send', {{
             method: 'POST',
@@ -920,21 +919,12 @@ async function testSend() {{
             body: JSON.stringify({{
                 to: to,
                 subject: 'Test Email from Secure Webmail',
-                body: `Hello!
-
-This is a test email sent from your authenticated webmail system.
-
-✅ Authentication: Working
-📧 Email delivery: Testing
-🔒 Security: Enabled
-
-Best regards,
-Your Webmail System`
+                body: emailBody
             }})
         }});
 
         const result = await response.text();
-        content.textContent = `Send Email Result:\n\n${result}`;
+        content.textContent = 'Send Email Result:\\n\\n' + result;
         results.style.display = 'block';
     }} catch (error) {{
         content.textContent = 'Error sending email: ' + error.message;
@@ -950,7 +940,7 @@ async function showHealth() {{
         const response = await fetch('/health');
         const data = await response.json();
 
-        content.textContent = 'System Health:\n\n' + JSON.stringify(data, null, 2);
+        content.textContent = 'System Health:\\n\\n' + JSON.stringify(data, null, 2);
         results.style.display = 'block';
     }} catch (error) {{
         content.textContent = 'Error checking health: ' + error.message;
@@ -966,7 +956,7 @@ async function showSessions() {{
         const response = await makeAuthRequest('/auth/sessions');
         const data = await response.json();
 
-        content.textContent = 'Active Sessions:\n\n' + JSON.stringify(data, null, 2);
+        content.textContent = 'Active Sessions:\\n\\n' + JSON.stringify(data, null, 2);
         results.style.display = 'block';
     }} catch (error) {{
         content.textContent = 'Error fetching sessions: ' + error.message;
@@ -974,8 +964,7 @@ async function showSessions() {{
     }}
 }}
 </script>
-</body></html>"#,
-            session.email, session.email
+</body></html>"#
         );
 
         HttpResponse::Ok().content_type("text/html").body(main_html)

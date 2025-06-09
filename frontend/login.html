@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Roundcube-Style Webmail</title>
+    <title>Webmail - Login</title>
     <style>
         * {
             margin: 0;
@@ -13,294 +13,141 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: #f5f5f5;
-            color: #333;
-            line-height: 1.4;
-        }
-
-        .webmail-container {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             display: flex;
-            height: 100vh;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+
+        .login-container {
             background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 2rem;
+            width: 100%;
+            max-width: 500px;
+            margin: 1rem;
         }
 
-        .sidebar {
-            width: 200px;
-            background: #f8f9fa;
-            border-right: 1px solid #ddd;
-            padding: 1rem;
-            overflow-y: auto;
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
         }
 
-        .user-info {
-            padding: 1rem;
-            background: #e9ecef;
-            border-radius: 6px;
-            margin-bottom: 1rem;
-            font-size: 0.85rem;
-        }
-
-        .user-email {
-            font-weight: 500;
+        .login-header h1 {
             color: #333;
             margin-bottom: 0.5rem;
+            font-size: 1.75rem;
+            font-weight: 600;
         }
 
-        .logout-btn {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.75rem;
-        }
-
-        .logout-btn:hover {
-            background: #c82333;
-        }
-
-        .sidebar h3 {
-            margin-bottom: 1rem;
-            color: #555;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .folder-list {
-            list-style: none;
-        }
-
-        .folder-item {
-            padding: 0.5rem;
-            cursor: pointer;
-            border-radius: 4px;
-            margin-bottom: 2px;
+        .login-header p {
+            color: #666;
             font-size: 0.9rem;
         }
 
-        .folder-item:hover {
-            background: #e9ecef;
+        .provider-tabs {
+            display: flex;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid #eee;
         }
 
-        .folder-item.active {
-            background: #007bff;
-            color: white;
-        }
-
-        .main-content {
+        .provider-tab {
             flex: 1;
-            display: flex;
-            flex-direction: column;
+            padding: 0.75rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: #666;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
         }
 
-        .toolbar {
-            padding: 0.75rem 1rem;
-            background: #f8f9fa;
-            border-bottom: 1px solid #ddd;
+        .provider-tab.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+            font-weight: 500;
+        }
+
+        .provider-tab:hover {
+            color: #007bff;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #333;
+            font-size: 0.9rem;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            transition: border-color 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+        }
+
+        .form-row {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
             gap: 1rem;
         }
 
-        .toolbar h2 {
-            font-size: 1.2rem;
-            font-weight: 500;
-            color: #333;
-        }
-
-        .toolbar-right {
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
+        .form-row .form-group {
+            flex: 1;
         }
 
         .btn {
-            padding: 0.5rem 1rem;
-            border: 1px solid #ddd;
-            background: white;
-            border-radius: 4px;
+            width: 100%;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
             cursor: pointer;
-            font-size: 0.85rem;
             transition: all 0.2s;
             display: flex;
             align-items: center;
-            gap: 0.3rem;
-        }
-
-        .btn:hover:not(:disabled) {
-            background: #f8f9fa;
-            border-color: #adb5bd;
-        }
-
-        .btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
+            justify-content: center;
+            gap: 0.5rem;
         }
 
         .btn-primary {
             background: #007bff;
             color: white;
-            border-color: #007bff;
         }
 
         .btn-primary:hover:not(:disabled) {
             background: #0056b3;
+            transform: translateY(-1px);
         }
 
-        .email-content {
-            flex: 1;
-            display: flex;
-            overflow: hidden;
-        }
-
-        .email-list-panel {
-            width: 400px;
-            border-right: 1px solid #ddd;
-            display: flex;
-            flex-direction: column;
-            background: white;
-        }
-
-        .list-header {
-            padding: 0.75rem 1rem;
-            background: #f8f9fa;
-            border-bottom: 1px solid #ddd;
-            font-size: 0.85rem;
-            color: #666;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        .email-list {
-            flex: 1;
-            overflow-y: auto;
-            list-style: none;
-        }
-
-        .email-item {
-            padding: 0.75rem 1rem;
-            border-bottom: 1px solid #eee;
-            cursor: pointer;
-            transition: background 0.15s;
-            position: relative;
-        }
-
-        .email-item:hover {
-            background: #f8f9fa;
-        }
-
-        .email-item.selected {
-            background: #e3f2fd;
-            border-left: 3px solid #007bff;
-        }
-
-        .email-item.unread {
-            background: #fff9c4;
-            font-weight: 600;
-        }
-
-        .email-item.unread:hover {
-            background: #fff3cd;
-        }
-
-        .email-from {
-            font-size: 0.9rem;
-            font-weight: 500;
-            color: #333;
-            margin-bottom: 0.25rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .email-subject {
-            font-size: 0.85rem;
-            color: #555;
-            margin-bottom: 0.25rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .email-date {
-            font-size: 0.75rem;
-            color: #888;
-        }
-
-        .email-preview-panel {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            background: white;
-        }
-
-        .preview-header {
-            padding: 1rem;
-            background: #f8f9fa;
-            border-bottom: 1px solid #ddd;
-        }
-
-        .preview-from {
-            font-size: 0.9rem;
-            color: #666;
-            margin-bottom: 0.5rem;
-        }
-
-        .preview-subject {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 0.5rem;
-        }
-
-        .preview-date {
-            font-size: 0.85rem;
-            color: #888;
-        }
-
-        .preview-body {
-            flex: 1;
-            padding: 1rem;
-            overflow-y: auto;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            color: #444;
-            word-wrap: break-word;
-        }
-
-        .preview-body.technical-content {
-            font-family: 'Courier New', monospace;
-            font-size: 0.8rem;
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 4px;
-            color: #666;
-        }
-
-        .empty-preview {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #888;
-            font-size: 0.9rem;
-        }
-
-        .loading {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            color: #666;
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
         }
 
         .spinner {
             width: 16px;
             height: 16px;
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #007bff;
+            border: 2px solid transparent;
+            border-top: 2px solid currentColor;
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -310,126 +157,10 @@
             100% { transform: rotate(360deg); }
         }
 
-        .stats {
-            font-size: 0.8rem;
-            color: #666;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 0.2rem 0.4rem;
-            font-size: 0.7rem;
-            font-weight: 500;
-            border-radius: 0.25rem;
-            margin-left: 0.5rem;
-        }
-
-        .badge-new {
-            background: #ffc107;
-            color: #212529;
-        }
-
-        .badge-recent {
-            background: #28a745;
-            color: white;
-        }
-
-        .compose-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-
-        .compose-modal.show {
-            display: flex;
-        }
-
-        .compose-dialog {
-            background: white;
-            border-radius: 8px;
-            width: 90%;
-            max-width: 600px;
-            max-height: 80vh;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        }
-
-        .compose-header {
-            padding: 1rem;
-            background: #f8f9fa;
-            border-bottom: 1px solid #ddd;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .compose-body {
-            padding: 1rem;
-        }
-
-        .form-group {
-            margin-bottom: 1rem;
-        }
-
-        .form-label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-weight: 500;
-            font-size: 0.9rem;
-        }
-
-        .form-control {
-            width: 100%;
-            padding: 0.5rem;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 0.9rem;
-        }
-
-        .form-control:focus {
-            outline: none;
-            border-color: #007bff;
-            box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
-        }
-
-        .textarea {
-            min-height: 150px;
-            resize: vertical;
-            font-family: inherit;
-        }
-
-        .compose-footer {
-            padding: 1rem;
-            background: #f8f9fa;
-            border-top: 1px solid #ddd;
-            display: flex;
-            gap: 0.5rem;
-            justify-content: flex-end;
-        }
-
-        .close-btn {
-            background: none;
-            border: none;
-            font-size: 1.5rem;
-            cursor: pointer;
-            color: #666;
-        }
-
-        .close-btn:hover {
-            color: #333;
-        }
-
         .alert {
             padding: 0.75rem;
             margin-bottom: 1rem;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 0.85rem;
         }
 
@@ -451,809 +182,431 @@
             border: 1px solid #bee5eb;
         }
 
-        .content-warning {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            color: #856404;
-            padding: 0.75rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-            font-size: 0.85rem;
-        }
-
-        .auth-error {
-            background: #f8d7da;
-            border: 1px solid #f5c6cb;
-            color: #721c24;
-            padding: 1rem;
+        .provider-info {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
             border-radius: 6px;
-            margin: 1rem;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .provider-info.gmail {
+            background: #fff3cd;
+            border-color: #ffeaa7;
+            color: #856404;
+        }
+
+        .advanced-toggle {
             text-align: center;
+            margin: 1rem 0;
         }
 
-        .auth-error button {
-            margin-top: 1rem;
-            padding: 0.5rem 1rem;
-            background: #007bff;
-            color: white;
+        .advanced-toggle button {
+            background: none;
             border: none;
-            border-radius: 4px;
+            color: #007bff;
             cursor: pointer;
+            font-size: 0.85rem;
+            text-decoration: underline;
         }
 
-        .auth-error button:hover {
-            background: #0056b3;
+        .advanced-settings {
+            display: none;
+            border-top: 1px solid #eee;
+            padding-top: 1rem;
+            margin-top: 1rem;
         }
 
-        @media (max-width: 768px) {
-            .sidebar {
-                display: none;
+        .advanced-settings.show {
+            display: block;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #eee;
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        @media (max-width: 600px) {
+            .login-container {
+                margin: 0.5rem;
+                padding: 1.5rem;
             }
 
-            .email-list-panel {
-                width: 100%;
+            .form-row {
+                flex-direction: column;
+                gap: 0;
             }
 
-            .email-preview-panel {
-                position: absolute;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: white;
-                z-index: 100;
-                display: none;
+            .provider-tabs {
+                flex-direction: column;
             }
 
-            .email-preview-panel.show {
-                display: flex;
+            .provider-tab {
+                border-bottom: 1px solid #eee;
+                border-right: none;
+            }
+
+            .provider-tab.active {
+                border-bottom-color: #007bff;
+                border-right-color: transparent;
             }
         }
     </style>
 </head>
 <body>
-<div id="auth-check" class="auth-error" style="display: none;">
-    <h3>🔐 Authentication Required</h3>
-    <p>Please sign in to access your emails</p>
-    <button id="go-to-login-btn">Go to Login</button>
-</div>
-
-<div id="webmail-app" class="webmail-container" style="display: none;">
-    <!-- Sidebar -->
-    <div class="sidebar">
-        <div class="user-info">
-            <div class="user-email" id="user-email">Loading...</div>
-            <button class="logout-btn" id="logout-btn">🚪 Logout</button>
-        </div>
-
-        <h3>Folders</h3>
-        <ul class="folder-list">
-            <li class="folder-item active">📧 Inbox</li>
-            <li class="folder-item">📤 Sent</li>
-            <li class="folder-item">📝 Drafts</li>
-            <li class="folder-item">🗑️ Trash</li>
-        </ul>
+<div class="login-container">
+    <div class="login-header">
+        <h1>📧 Webmail Login</h1>
+        <p>Sign in to access your email account</p>
     </div>
 
-    <!-- Main Content -->
-    <div class="main-content">
-        <!-- Toolbar -->
-        <div class="toolbar">
-            <h2>Inbox</h2>
-            <div class="toolbar-right">
-                <div id="email-stats" class="stats"></div>
-                <select id="email-limit" class="btn">
-                    <option value="20">20 emails</option>
-                    <option value="50" selected>50 emails</option>
-                    <option value="100">100 emails</option>
-                </select>
-                <button id="refresh-btn" class="btn">
-                    <span id="refresh-icon">🔄</span>
-                    <span id="refresh-text">Refresh</span>
-                </button>
-                <button id="compose-btn" class="btn btn-primary">✍️ Compose</button>
-            </div>
-        </div>
-
-        <!-- Email Content Area -->
-        <div class="email-content">
-            <!-- Email List Panel -->
-            <div class="email-list-panel">
-                <div class="list-header">
-                    <span>From / Subject</span>
-                    <span>Date</span>
-                </div>
-                <div id="email-alerts"></div>
-                <ul id="email-list" class="email-list"></ul>
-            </div>
-
-            <!-- Email Preview Panel -->
-            <div id="email-preview" class="email-preview-panel">
-                <div class="empty-preview">
-                    📧 Select an email to view its content
-                </div>
-            </div>
-        </div>
+    <div class="provider-tabs">
+        <button class="provider-tab active" data-provider="gmail">Gmail</button>
+        <button class="provider-tab" data-provider="outlook">Outlook</button>
+        <button class="provider-tab" data-provider="yahoo">Yahoo</button>
+        <button class="provider-tab" data-provider="custom">Custom</button>
     </div>
-</div>
 
-<!-- Compose Modal -->
-<div id="compose-modal" class="compose-modal">
-    <div class="compose-dialog">
-        <div class="compose-header">
-            <h3>Compose Email</h3>
-            <button class="close-btn" id="close-compose-btn">&times;</button>
+    <form id="login-form">
+        <div id="login-alerts"></div>
+
+        <div class="provider-info" id="provider-info">
+            <strong>Gmail Setup:</strong> Use your Gmail address and an App Password (not your regular password).
+            <a href="https://support.google.com/accounts/answer/185833" target="_blank">Generate App Password</a>
         </div>
-        <form id="compose-form">
-            <div class="compose-body">
-                <div id="compose-alerts"></div>
+
+        <div class="form-group">
+            <label class="form-label" for="email">Email Address</label>
+            <input type="email" id="email" class="form-control" placeholder="your-email@gmail.com" required>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="password">
+                <span id="password-label">App Password</span>
+            </label>
+            <input type="password" id="password" class="form-control" placeholder="16-character app password" required>
+        </div>
+
+        <div class="advanced-toggle">
+            <button type="button" id="advanced-toggle-btn">⚙️ Advanced Settings</button>
+        </div>
+
+        <div class="advanced-settings" id="advanced-settings">
+            <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label" for="compose-to">To:</label>
-                    <input type="email" id="compose-to" class="form-control" placeholder="recipient@example.com" required>
+                    <label class="form-label" for="imap-server">IMAP Server</label>
+                    <input type="text" id="imap-server" class="form-control" placeholder="imap.gmail.com">
                 </div>
                 <div class="form-group">
-                    <label class="form-label" for="compose-subject">Subject:</label>
-                    <input type="text" id="compose-subject" class="form-control" placeholder="Enter subject" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="compose-body">Message:</label>
-                    <textarea id="compose-body" class="form-control textarea" placeholder="Write your email here..." required></textarea>
+                    <label class="form-label" for="imap-port">IMAP Port</label>
+                    <input type="number" id="imap-port" class="form-control" placeholder="993">
                 </div>
             </div>
-            <div class="compose-footer">
-                <button type="button" class="btn" id="cancel-compose-btn">Cancel</button>
-                <button type="submit" id="send-btn" class="btn btn-primary">
-                    <span id="send-icon">📤</span>
-                    <span id="send-text">Send</span>
-                </button>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label" for="smtp-server">SMTP Server</label>
+                    <input type="text" id="smtp-server" class="form-control" placeholder="smtp.gmail.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="smtp-port">SMTP Port</label>
+                    <input type="number" id="smtp-port" class="form-control" placeholder="587">
+                </div>
             </div>
-        </form>
+        </div>
+
+        <button type="submit" id="login-btn" class="btn btn-primary">
+            <span id="login-icon">🔐</span>
+            <span id="login-text">Sign In</span>
+        </button>
+    </form>
+
+    <div class="footer">
+        <p>🔒 Your credentials are encrypted and never stored permanently</p>
     </div>
 </div>
 
 <script>
-    // Global functions - defined in global scope first
-    window.redirectToLogin = function() {
-        console.log('Redirecting to login...');
-        window.location.href = 'http://127.0.0.1:3001/login.html';
-    };
-
-    window.closeCompose = function() {
-        if (window.webmail) {
-            webmail.closeCompose();
-        }
-    };
-
-    window.logout = function() {
-        if (window.webmail) {
-            webmail.logout();
-        }
-    };
-
-    class AuthenticatedWebmail {
+    class WebmailLogin {
         constructor() {
             this.apiBase = 'http://127.0.0.1:3001';
-            this.emails = [];
-            this.selectedEmail = null;
-            this.emailLimit = 50;
+            this.currentProvider = 'gmail';
             this.isLoading = false;
-            this.sessionToken = localStorage.getItem('webmail_session');
+
+            this.providerConfigs = {
+                gmail: {
+                    name: 'Gmail',
+                    imap_server: 'imap.gmail.com',
+                    imap_port: 993,
+                    smtp_server: 'smtp.gmail.com',
+                    smtp_port: 587,
+                    requires_app_password: true,
+                    info: '<strong>Gmail Setup:</strong> Use your Gmail address and an App Password (not your regular password). <a href="https://support.google.com/accounts/answer/185833" target="_blank">Generate App Password</a>',
+                    placeholder: 'your-email@gmail.com',
+                    passwordLabel: 'App Password',
+                    passwordPlaceholder: '16-character app password'
+                },
+                outlook: {
+                    name: 'Outlook',
+                    imap_server: 'outlook.office365.com',
+                    imap_port: 993,
+                    smtp_server: 'smtp-mail.outlook.com',
+                    smtp_port: 587,
+                    requires_app_password: false,
+                    info: '<strong>Outlook Setup:</strong> Use your Microsoft account email and regular password.',
+                    placeholder: 'your-email@outlook.com',
+                    passwordLabel: 'Password',
+                    passwordPlaceholder: 'Your account password'
+                },
+                yahoo: {
+                    name: 'Yahoo',
+                    imap_server: 'imap.mail.yahoo.com',
+                    imap_port: 993,
+                    smtp_server: 'smtp.mail.yahoo.com',
+                    smtp_port: 587,
+                    requires_app_password: true,
+                    info: '<strong>Yahoo Setup:</strong> Use your Yahoo email and an App Password. <a href="https://help.yahoo.com/kb/generate-third-party-passwords-sln15241.html" target="_blank">Generate App Password</a>',
+                    placeholder: 'your-email@yahoo.com',
+                    passwordLabel: 'App Password',
+                    passwordPlaceholder: 'App password from Yahoo'
+                },
+                custom: {
+                    name: 'Custom',
+                    imap_server: '',
+                    imap_port: 993,
+                    smtp_server: '',
+                    smtp_port: 587,
+                    requires_app_password: false,
+                    info: '<strong>Custom Setup:</strong> Enter your email provider\'s IMAP and SMTP settings manually.',
+                    placeholder: 'your-email@domain.com',
+                    passwordLabel: 'Password',
+                    passwordPlaceholder: 'Your email password'
+                }
+            };
 
             this.init();
         }
 
-        async init() {
-            // Check authentication first
-            if (!this.sessionToken) {
-                this.showAuthError();
-                return;
+        init() {
+            // Check if already logged in
+            const sessionToken = localStorage.getItem('webmail_session');
+            if (sessionToken) {
+                this.verifySession(sessionToken);
             }
 
-            // Verify session
+            this.bindEvents();
+            this.updateProviderSettings();
+        }
+
+        async verifySession(token) {
             try {
                 const response = await fetch(`${this.apiBase}/auth/verify`, {
-                    headers: {
-                        'Authorization': `Bearer ${this.sessionToken}`
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error('Session invalid');
-                }
-
-                const result = await response.json();
-                if (!result.valid) {
-                    throw new Error('Session expired');
-                }
-
-                // Show user email
-                document.getElementById('user-email').textContent = result.user_email;
-
-                // Show main app
-                document.getElementById('webmail-app').style.display = 'flex';
-
-                // Initialize webmail functionality
-                this.bindEvents();
-                this.loadEmails();
-                this.startAutoRefresh();
-
-            } catch (error) {
-                console.error('Authentication failed:', error);
-                localStorage.removeItem('webmail_session');
-                this.showAuthError();
-            }
-        }
-
-        showAuthError() {
-            document.getElementById('auth-check').style.display = 'block';
-        }
-
-        bindEvents() {
-            // Login button
-            const loginBtn = document.getElementById('go-to-login-btn');
-            if (loginBtn) {
-                loginBtn.addEventListener('click', () => {
-                    window.redirectToLogin();
-                });
-            }
-
-            // Logout button
-            const logoutBtn = document.getElementById('logout-btn');
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', () => {
-                    this.logout();
-                });
-            }
-
-            // Refresh button
-            const refreshBtn = document.getElementById('refresh-btn');
-            if (refreshBtn) {
-                refreshBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    if (!this.isLoading) {
-                        this.loadEmails(true);
-                    }
-                });
-            }
-
-            // Email limit selector
-            const emailLimit = document.getElementById('email-limit');
-            if (emailLimit) {
-                emailLimit.addEventListener('change', (e) => {
-                    this.emailLimit = parseInt(e.target.value);
-                    if (!this.isLoading) {
-                        this.loadEmails();
-                    }
-                });
-            }
-
-            // Compose button
-            const composeBtn = document.getElementById('compose-btn');
-            if (composeBtn) {
-                composeBtn.addEventListener('click', () => {
-                    this.showCompose();
-                });
-            }
-
-            // Compose form
-            const composeForm = document.getElementById('compose-form');
-            if (composeForm) {
-                composeForm.addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    this.sendEmail();
-                });
-            }
-
-            // Close compose buttons
-            const closeComposeBtn = document.getElementById('close-compose-btn');
-            const cancelComposeBtn = document.getElementById('cancel-compose-btn');
-
-            if (closeComposeBtn) {
-                closeComposeBtn.addEventListener('click', () => {
-                    this.closeCompose();
-                });
-            }
-
-            if (cancelComposeBtn) {
-                cancelComposeBtn.addEventListener('click', () => {
-                    this.closeCompose();
-                });
-            }
-
-            // Close modal on outside click
-            const composeModal = document.getElementById('compose-modal');
-            if (composeModal) {
-                composeModal.addEventListener('click', (e) => {
-                    if (e.target.id === 'compose-modal') {
-                        this.closeCompose();
-                    }
-                });
-            }
-        }
-
-        async makeAuthenticatedRequest(url, options = {}) {
-            const authHeaders = {
-                'Authorization': `Bearer ${this.sessionToken}`,
-                ...options.headers
-            };
-
-            const response = await fetch(url, {
-                ...options,
-                headers: authHeaders
-            });
-
-            if (response.status === 401) {
-                // Session expired
-                localStorage.removeItem('webmail_session');
-                this.showAuthError();
-                throw new Error('Authentication required');
-            }
-
-            return response;
-        }
-
-        async loadEmails(forceRefresh = false) {
-            if (this.isLoading) return;
-
-            this.isLoading = true;
-            const refreshBtn = document.getElementById('refresh-btn');
-            const refreshIcon = document.getElementById('refresh-icon');
-            const refreshText = document.getElementById('refresh-text');
-
-            this.setLoading(refreshBtn, refreshIcon, refreshText, true);
-
-            if (forceRefresh) {
-                this.showAlert('email-alerts', 'info', 'Force refreshing emails...');
-            } else {
-                this.showAlert('email-alerts', 'info', 'Loading emails...');
-            }
-
-            try {
-                const url = `${this.apiBase}/emails?limit=${this.emailLimit}${forceRefresh ? '&refresh=true' : ''}`;
-                const response = await this.makeAuthenticatedRequest(url);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const emailData = await response.json();
-
-                if (Array.isArray(emailData)) {
-                    this.emails = emailData;
-                    this.renderEmailList();
-                    this.updateStats();
-                    this.showAlert('email-alerts', 'success', `Loaded ${this.emails.length} emails`, 2000);
-                } else {
-                    throw new Error('Invalid response format');
-                }
-
-            } catch (error) {
-                console.error('Load emails error:', error);
-                if (error.message !== 'Authentication required') {
-                    this.showAlert('email-alerts', 'danger', `Failed to load emails: ${error.message}`);
-                    this.renderEmptyList();
-                }
-            } finally {
-                this.isLoading = false;
-                this.setLoading(refreshBtn, refreshIcon, refreshText, false);
-            }
-        }
-
-        async checkNewEmails() {
-            if (this.isLoading) return;
-
-            try {
-                const latestDate = this.emails.length > 0 ? this.emails[0].date : null;
-                const url = latestDate
-                    ? `${this.apiBase}/emails/new?since=${encodeURIComponent(latestDate)}`
-                    : `${this.apiBase}/emails/new`;
-
-                const response = await this.makeAuthenticatedRequest(url);
-                if (!response.ok) return;
-
-                const newEmails = await response.json();
-
-                if (Array.isArray(newEmails) && newEmails.length > 0) {
-                    this.emails = [...newEmails, ...this.emails];
-                    this.renderEmailList();
-                    this.updateStats();
-
-                    this.showAlert('email-alerts', 'success', `📧 ${newEmails.length} new email(s) received!`, 3000);
-
-                    if (Notification.permission === 'granted') {
-                        new Notification(`You have ${newEmails.length} new email(s)`, {
-                            icon: '📧',
-                            body: newEmails[0].subject
-                        });
-                    }
-                }
-            } catch (error) {
-                console.error('Check new emails error:', error);
-            }
-        }
-
-        renderEmailList() {
-            const listContainer = document.getElementById('email-list');
-
-            if (!Array.isArray(this.emails) || this.emails.length === 0) {
-                this.renderEmptyList();
-                return;
-            }
-
-            const emailsHtml = this.emails.map((email, index) => {
-                if (!email || typeof email !== 'object') {
-                    return '';
-                }
-
-                const classes = ['email-item'];
-                if (!email.is_seen) classes.push('unread');
-
-                return `
-                    <li class="${classes.join(' ')}" data-email-id="${this.escapeHtml(email.id || 'unknown')}" onclick="webmail.selectEmail('${this.escapeHtml(email.id || 'unknown')}')">
-                        <div class="email-from">${this.escapeHtml(this.shortenText(email.from || 'Unknown', 30))}
-                            ${!email.is_seen ? '<span class="badge badge-new">New</span>' : ''}
-                            ${email.is_recent ? '<span class="badge badge-recent">Recent</span>' : ''}
-                        </div>
-                        <div class="email-subject">${this.escapeHtml(this.shortenText(email.subject || 'No Subject', 40))}</div>
-                        <div class="email-date">${this.formatDate(email.date)}</div>
-                    </li>
-                `;
-            }).filter(html => html).join('');
-
-            listContainer.innerHTML = emailsHtml;
-        }
-
-        renderEmptyList() {
-            const listContainer = document.getElementById('email-list');
-            listContainer.innerHTML = `
-                <li style="padding: 2rem; text-align: center; color: #888;">
-                    📭 No emails found
-                </li>
-            `;
-        }
-
-        async selectEmail(emailId) {
-            if (this.isLoading || !emailId) return;
-
-            document.querySelectorAll('.email-item').forEach(item => {
-                item.classList.remove('selected');
-            });
-
-            const emailItem = document.querySelector(`[data-email-id="${emailId}"]`);
-            if (emailItem) {
-                emailItem.classList.add('selected');
-            }
-
-            const previewPanel = document.getElementById('email-preview');
-            previewPanel.innerHTML = `
-                <div class="empty-preview">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        Loading email...
-                    </div>
-                </div>
-            `;
-
-            try {
-                const response = await this.makeAuthenticatedRequest(`${this.apiBase}/email/${encodeURIComponent(emailId)}`);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const email = await response.json();
-                this.renderEmailPreview(email);
-
-                const emailIndex = this.emails.findIndex(e => e.id === emailId);
-                if (emailIndex !== -1) {
-                    this.emails[emailIndex].is_seen = true;
-                    if (emailItem) {
-                        emailItem.classList.remove('unread');
-                    }
-                    this.updateStats();
-                }
-
-            } catch (error) {
-                console.error('Load email detail error:', error);
-                if (error.message !== 'Authentication required') {
-                    previewPanel.innerHTML = `
-                        <div class="empty-preview">
-                            ❌ Failed to load email: ${error.message}
-                        </div>
-                    `;
-                }
-            }
-
-            if (window.innerWidth <= 768) {
-                previewPanel.classList.add('show');
-            }
-        }
-
-        renderEmailPreview(email) {
-            if (!email || typeof email !== 'object') {
-                document.getElementById('email-preview').innerHTML = `
-                    <div class="empty-preview">
-                        ❌ Invalid email data
-                    </div>
-                `;
-                return;
-            }
-
-            let emailBody = email.body || 'No content';
-            let bodyClass = 'preview-body';
-            let contentWarning = '';
-
-            if (this.isTechnicalContent(emailBody)) {
-                emailBody = this.cleanComplexEmailContent(emailBody);
-                if (emailBody.includes('technical content')) {
-                    bodyClass += ' technical-content';
-                    contentWarning = '<div class="content-warning">⚠️ This email contains technical content that has been simplified for display.</div>';
-                }
-            }
-
-            const previewPanel = document.getElementById('email-preview');
-            previewPanel.innerHTML = `
-                <div class="preview-header">
-                    <div class="preview-from">From: ${this.escapeHtml(email.from || 'Unknown')}</div>
-                    <div class="preview-subject">${this.escapeHtml(email.subject || 'No Subject')}</div>
-                    <div class="preview-date">${this.formatDate(email.date)}</div>
-                </div>
-                ${contentWarning}
-                <div class="${bodyClass}">${this.escapeHtml(emailBody)}</div>
-            `;
-        }
-
-        isTechnicalContent(content) {
-            const technicalIndicators = [
-                'Content-Type:',
-                'boundary=',
-                'multipart/',
-                'MIME-Version',
-                /^[0-9a-fA-F]{20,}/m,
-                /--[0-9a-fA-F]{10,}/,
-            ];
-
-            return technicalIndicators.some(indicator => {
-                if (typeof indicator === 'string') {
-                    return content.includes(indicator);
-                } else {
-                    return indicator.test(content);
-                }
-            });
-        }
-
-        cleanComplexEmailContent(content) {
-            const lines = content.split('\n');
-            const cleanLines = [];
-            let foundReadableContent = false;
-
-            for (const line of lines) {
-                const trimmed = line.trim();
-
-                if (!trimmed) continue;
-
-                if (trimmed.startsWith('Content-') ||
-                    trimmed.startsWith('MIME-') ||
-                    trimmed.startsWith('--') ||
-                    trimmed.includes('boundary=') ||
-                    /^[0-9a-fA-F]{30,}$/.test(trimmed) ||
-                    trimmed.startsWith('=?') ||
-                    trimmed.startsWith('Return-Path:') ||
-                    trimmed.startsWith('Received:')) {
-                    continue;
-                }
-
-                if (trimmed.length > 10) {
-                    let cleaned = trimmed
-                        .replace(/=20/g, ' ')
-                        .replace(/=\r?\n/g, '')
-                        .replace(/=3D/g, '=')
-                        .replace(/=2E/g, '.')
-                        .replace(/=22/g, '"')
-                        .replace(/=27/g, "'")
-                        .replace(/=([0-9A-Fa-f]{2})/g, (match, hex) => {
-                            try {
-                                return String.fromCharCode(parseInt(hex, 16));
-                            } catch (e) {
-                                return match;
-                            }
-                        });
-
-                    const readableChars = cleaned.match(/[a-zA-Z\s]/g);
-                    const totalChars = cleaned.length;
-
-                    if (readableChars && (readableChars.length / totalChars) > 0.5 && cleaned.length > 5) {
-                        cleanLines.push(cleaned);
-                        foundReadableContent = true;
-                    }
-                }
-
-                if (cleanLines.join(' ').length > 1500) {
-                    break;
-                }
-            }
-
-            if (!foundReadableContent || cleanLines.length === 0) {
-                return 'This email contains technical content that cannot be displayed in a readable format.';
-            }
-
-            let result = cleanLines.join('\n');
-            if (result.length > 2000) {
-                result = result.substring(0, 2000) + '...\n\n[Content truncated for readability]';
-            }
-
-            return result;
-        }
-
-        updateStats() {
-            if (!Array.isArray(this.emails)) return;
-
-            const unread = this.emails.filter(e => e && !e.is_seen).length;
-            const recent = this.emails.filter(e => e && e.is_recent).length;
-            const statsEl = document.getElementById('email-stats');
-
-            if (this.emails.length > 0) {
-                statsEl.textContent = `${this.emails.length} emails • ${unread} unread • ${recent} recent`;
-            } else {
-                statsEl.textContent = '';
-            }
-        }
-
-        showCompose() {
-            document.getElementById('compose-modal').classList.add('show');
-            document.getElementById('compose-to').focus();
-        }
-
-        closeCompose() {
-            document.getElementById('compose-modal').classList.remove('show');
-            document.getElementById('compose-form').reset();
-            document.getElementById('compose-alerts').innerHTML = '';
-        }
-
-        async sendEmail() {
-            const sendBtn = document.getElementById('send-btn');
-            const sendIcon = document.getElementById('send-icon');
-            const sendText = document.getElementById('send-text');
-
-            const emailData = {
-                to: document.getElementById('compose-to').value,
-                subject: document.getElementById('compose-subject').value,
-                body: document.getElementById('compose-body').value
-            };
-
-            this.setLoading(sendBtn, sendIcon, sendText, true);
-            this.showAlert('compose-alerts', 'info', 'Sending email...');
-
-            try {
-                const response = await this.makeAuthenticatedRequest(`${this.apiBase}/send`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(emailData)
+                    headers: { 'Authorization': `Bearer ${token}` }
                 });
 
                 if (response.ok) {
-                    this.showAlert('compose-alerts', 'success', 'Email sent successfully!', 2000);
-                    setTimeout(() => this.closeCompose(), 2000);
-                } else {
-                    const errorText = await response.text();
-                    throw new Error(errorText);
+                    const result = await response.json();
+                    if (result.valid) {
+                        // Already logged in, redirect to main app
+                        window.location.href = '/';
+                        return;
+                    }
                 }
             } catch (error) {
-                console.error('Send email error:', error);
-                if (error.message !== 'Authentication required') {
-                    this.showAlert('compose-alerts', 'danger', `Failed to send: ${error.message}`);
-                }
-            } finally {
-                this.setLoading(sendBtn, sendIcon, sendText, false);
+                console.log('Session verification failed:', error);
             }
+
+            // Invalid session, remove token
+            localStorage.removeItem('webmail_session');
         }
 
-        async logout() {
-            try {
-                await this.makeAuthenticatedRequest(`${this.apiBase}/auth/logout`, {
-                    method: 'POST'
+        bindEvents() {
+            // Provider tabs
+            document.querySelectorAll('.provider-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const provider = tab.dataset.provider;
+                    this.switchProvider(provider);
                 });
-            } catch (error) {
-                console.error('Logout error:', error);
-            } finally {
-                localStorage.removeItem('webmail_session');
-                window.location.href = 'http://127.0.0.1:3001/login.html';
+            });
+
+            // Advanced settings toggle
+            document.getElementById('advanced-toggle-btn').addEventListener('click', () => {
+                const settings = document.getElementById('advanced-settings');
+                const isVisible = settings.classList.contains('show');
+
+                if (isVisible) {
+                    settings.classList.remove('show');
+                    document.getElementById('advanced-toggle-btn').textContent = '⚙️ Advanced Settings';
+                } else {
+                    settings.classList.add('show');
+                    document.getElementById('advanced-toggle-btn').textContent = '🔼 Hide Advanced Settings';
+                }
+            });
+
+            // Login form
+            document.getElementById('login-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.handleLogin();
+            });
+
+            // Auto-populate settings when provider changes
+            document.getElementById('email').addEventListener('input', () => {
+                this.autoDetectProvider();
+            });
+        }
+
+        switchProvider(provider) {
+            this.currentProvider = provider;
+
+            // Update active tab
+            document.querySelectorAll('.provider-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`[data-provider="${provider}"]`).classList.add('active');
+
+            this.updateProviderSettings();
+        }
+
+        updateProviderSettings() {
+            const config = this.providerConfigs[this.currentProvider];
+
+            // Update info box
+            document.getElementById('provider-info').innerHTML = config.info;
+            document.getElementById('provider-info').className = `provider-info ${this.currentProvider}`;
+
+            // Update form placeholders and labels
+            document.getElementById('email').placeholder = config.placeholder;
+            document.getElementById('password-label').textContent = config.passwordLabel;
+            document.getElementById('password').placeholder = config.passwordPlaceholder;
+
+            // Update advanced settings
+            document.getElementById('imap-server').value = config.imap_server;
+            document.getElementById('imap-port').value = config.imap_port;
+            document.getElementById('smtp-server').value = config.smtp_server;
+            document.getElementById('smtp-port').value = config.smtp_port;
+
+            // Show/hide advanced settings for custom provider
+            if (this.currentProvider === 'custom') {
+                document.getElementById('advanced-settings').classList.add('show');
+                document.getElementById('advanced-toggle-btn').textContent = '🔼 Hide Advanced Settings';
             }
         }
 
-        setLoading(btn, icon, text, isLoading) {
-            if (!btn || !icon || !text) return;
+        autoDetectProvider() {
+            const email = document.getElementById('email').value.toLowerCase();
+
+            if (email.includes('@gmail.com')) {
+                this.switchProvider('gmail');
+            } else if (email.includes('@outlook.com') || email.includes('@hotmail.com') || email.includes('@live.com')) {
+                this.switchProvider('outlook');
+            } else if (email.includes('@yahoo.com')) {
+                this.switchProvider('yahoo');
+            } else if (email.includes('@') && !email.includes('@gmail.com')) {
+                this.switchProvider('custom');
+            }
+        }
+
+        async handleLogin() {
+            if (this.isLoading) return;
+
+            const formData = {
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value,
+                imap_server: document.getElementById('imap-server').value,
+                imap_port: parseInt(document.getElementById('imap-port').value),
+                smtp_server: document.getElementById('smtp-server').value,
+                smtp_port: parseInt(document.getElementById('smtp-port').value),
+                provider: this.currentProvider
+            };
+
+            // Validation
+            if (!formData.email || !formData.password) {
+                this.showAlert('danger', 'Please enter both email and password');
+                return;
+            }
+
+            if (!formData.imap_server || !formData.smtp_server) {
+                this.showAlert('danger', 'Please fill in all server settings');
+                return;
+            }
+
+            this.setLoading(true);
+            this.showAlert('info', 'Signing in and testing connection...');
+
+            try {
+                const response = await fetch(`${this.apiBase}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    // Store session token
+                    localStorage.setItem('webmail_session', result.session_token);
+
+                    this.showAlert('success', 'Login successful! Redirecting...');
+
+                    // Redirect to main app
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    throw new Error(result.error || 'Login failed');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                this.showAlert('danger', `Login failed: ${error.message}`);
+            } finally {
+                this.setLoading(false);
+            }
+        }
+
+        setLoading(isLoading) {
+            this.isLoading = isLoading;
+            const btn = document.getElementById('login-btn');
+            const icon = document.getElementById('login-icon');
+            const text = document.getElementById('login-text');
 
             btn.disabled = isLoading;
+
             if (isLoading) {
                 icon.innerHTML = '<div class="spinner"></div>';
-                text.textContent = text.textContent.includes('Refresh') ? 'Loading...' : 'Sending...';
+                text.textContent = 'Signing In...';
             } else {
-                icon.textContent = text.textContent.includes('Loading') ? '🔄' : '📤';
-                text.textContent = text.textContent.includes('Loading') ? 'Refresh' : 'Send';
+                icon.textContent = '🔐';
+                text.textContent = 'Sign In';
             }
         }
 
-        showAlert(containerId, type, message, autoHide = 0) {
-            const container = document.getElementById(containerId);
-            if (!container) return;
+        showAlert(type, message) {
+            const alertsContainer = document.getElementById('login-alerts');
+            alertsContainer.innerHTML = `<div class="alert alert-${type}">${this.escapeHtml(message)}</div>`;
 
-            container.innerHTML = `<div class="alert alert-${type}">${this.escapeHtml(message)}</div>`;
-
-            if (autoHide > 0) {
+            if (type === 'success') {
                 setTimeout(() => {
-                    container.innerHTML = '';
-                }, autoHide);
+                    alertsContainer.innerHTML = '';
+                }, 3000);
             }
-        }
-
-        startAutoRefresh() {
-            setInterval(() => {
-                this.checkNewEmails();
-            }, 30000);
-
-            if ('Notification' in window && Notification.permission === 'default') {
-                Notification.requestPermission();
-            }
-        }
-
-        formatDate(dateStr) {
-            if (!dateStr) return '';
-
-            try {
-                const date = new Date(dateStr);
-                if (isNaN(date.getTime())) return dateStr;
-
-                const now = new Date();
-                const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
-
-                if (diffDays === 0) {
-                    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                } else if (diffDays === 1) {
-                    return 'Yesterday';
-                } else if (diffDays < 7) {
-                    return date.toLocaleDateString([], { weekday: 'short' });
-                } else {
-                    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-                }
-            } catch (e) {
-                return dateStr;
-            }
-        }
-
-        shortenText(text, maxLength) {
-            if (!text) return '';
-            if (typeof text !== 'string') return String(text);
-            return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
         }
 
         escapeHtml(text) {
-            if (!text) return '';
-            if (typeof text !== 'string') text = String(text);
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
     }
 
-    // Initialize the webmail application
-    let webmail;
+    // Initialize login when DOM is ready
     document.addEventListener('DOMContentLoaded', () => {
-        console.log('DOM loaded, initializing webmail...');
-        webmail = new AuthenticatedWebmail();
-
-        // Ensure global access to webmail instance
-        window.webmail = webmail;
-
-        // Additional event listener for login button as backup
-        const loginBtn = document.getElementById('go-to-login-btn');
-        if (loginBtn) {
-            loginBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                console.log('Login button clicked');
-                window.redirectToLogin();
-            });
-        }
+        new WebmailLogin();
     });
 </script>
 </body>

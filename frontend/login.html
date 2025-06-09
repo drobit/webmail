@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webmail Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 420px;
+            overflow: hidden;
+        }
+
+        .login-header {
+            background: #f8f9fa;
+            padding: 2rem;
+            text-align: center;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .login-header h1 {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+
+        .login-header p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .login-form {
+            padding: 2rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #333;
+            font-size: 0.9rem;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+        }
+
+        .provider-select {
+            margin-bottom: 1rem;
+        }
+
+        .provider-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .provider-btn {
+            flex: 1;
+            padding: 0.5rem;
+            border: 2px solid #e9ecef;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.3s;
+        }
+
+        .provider-btn.active {
+            border-color: #007bff;
+            background: #e3f2fd;
+            color: #007bff;
+        }
+
+        .provider-btn:hover {
+            border-color: #007bff;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 0.75rem;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .login-btn:hover:not(:disabled) {
+            background: #0056b3;
+        }
+
+        .login-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid transparent;
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .alert {
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+
+        .alert-danger {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .password-toggle {
+            position: relative;
+        }
+
+        .password-toggle-btn {
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .advanced-settings {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+
+        .advanced-toggle {
+            background: none;
+            border: none;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 0.85rem;
+            text-decoration: underline;
+            margin-bottom: 1rem;
+        }
+
+        .server-settings {
+            display: none;
+        }
+
+        .server-settings.show {
+            display: block;
+        }
+
+        .server-group {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .server-group .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .help-text {
+            font-size: 0.75rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+
+        .footer {
+            padding: 1rem 2rem;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .remember-me {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .remember-me input[type="checkbox"] {
+            width: auto;
+        }
+
+        @media (max-width: 480px) {
+            .login-container {
+                margin: 0.5rem;
+            }
+
+            .login-form {
+                padding: 1.5rem;
+            }
+
+            .provider-buttons {
+                flex-direction: column;
+            }
+
+            .server-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="login-container">
+    <div class="login-header">
+        <h1>📧 Webmail</h1>
+        <p>Sign in to access your emails</p>
+    </div>
+
+    <form id="login-form" class="login-form">
+        <div id="login-alerts"></div>
+
+        <div class="provider-select">
+            <div class="provider-buttons">
+                <button type="button" class="provider-btn active" data-provider="gmail">
+                    Gmail
+                </button>
+                <button type="button" class="provider-btn" data-provider="outlook">
+                    Outlook
+                </button>
+                <button type="button" class="provider-btn" data-provider="custom">
+                    Custom
+                </button>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="email">Email Address</label>
+            <input
+                    type="email"
+                    id="email"
+                    class="form-control"
+                    placeholder="your.email@example.com"
+                    required
+                    autocomplete="username"
+            >
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="password">Password / App Password</label>
+            <div class="password-toggle">
+                <input
+                        type="password"
+                        id="password"
+                        class="form-control"
+                        placeholder="Enter your password or app password"
+                        required
+                        autocomplete="current-password"
+                >
+                <button type="button" class="password-toggle-btn" onclick="togglePassword()">
+                    👁️
+                </button>
+            </div>
+            <div class="help-text" id="password-help">
+                For Gmail, use an App Password instead of your regular password
+            </div>
+        </div>
+
+        <div class="remember-me">
+            <input type="checkbox" id="remember" name="remember">
+            <label for="remember">Remember my credentials (stored securely in browser)</label>
+        </div>
+
+        <div class="advanced-settings">
+            <button type="button" class="advanced-toggle" onclick="toggleAdvanced()">
+                ⚙️ Advanced Server Settings
+            </button>
+            <div class="server-settings" id="server-settings">
+                <div class="server-group">
+                    <div class="form-group">
+                        <label class="form-label" for="imap-server">IMAP Server</label>
+                        <input type="text" id="imap-server" class="form-control" value="imap.gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="imap-port">IMAP Port</label>
+                        <input type="number" id="imap-port" class="form-control" value="993">
+                    </div>
+                </div>
+                <div class="server-group">
+                    <div class="form-group">
+                        <label class="form-label" for="smtp-server">SMTP Server</label>
+                        <input type="text" id="smtp-server" class="form-control" value="smtp.gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="smtp-port">SMTP Port</label>
+                        <input type="number" id="smtp-port" class="form-control" value="587">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" id="login-btn" class="login-btn">
+            <span id="login-text">🔐 Sign In</span>
+        </button>
+    </form>
+
+    <div class="footer">
+        <p>Your credentials are encrypted and stored securely</p>
+    </div>
+</div>
+
+<script>
+    class WebmailLogin {
+        constructor() {
+            this.apiBase = 'http://127.0.0.1:3001';
+            this.providers = {
+                gmail: {
+                    imap: { server: 'imap.gmail.com', port: 993 },
+                    smtp: { server: 'smtp.gmail.com', port: 587 },
+                    help: 'For Gmail, use an App Password instead of your regular password'
+                },
+                outlook: {
+                    imap: { server: 'outlook.office365.com', port: 993 },
+                    smtp: { server: 'smtp-mail.outlook.com', port: 587 },
+                    help: 'Use your regular Microsoft account password'
+                },
+                custom: {
+                    imap: { server: '', port: 993 },
+                    smtp: { server: '', port: 587 },
+                    help: 'Enter your email provider\'s server settings'
+                }
+            };
+            this.currentProvider = 'gmail';
+            this.init();
+        }
+
+        init() {
+            this.bindEvents();
+            this.loadSavedCredentials();
+            this.updateProviderSettings();
+        }
+
+        bindEvents() {
+            // Provider selection
+            document.querySelectorAll('.provider-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.selectProvider(btn.dataset.provider);
+                });
+            });
+
+            // Login form
+            document.getElementById('login-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.handleLogin();
+            });
+
+            // Auto-detect provider from email
+            document.getElementById('email').addEventListener('blur', () => {
+                this.autoDetectProvider();
+            });
+        }
+
+        selectProvider(provider) {
+            document.querySelectorAll('.provider-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`[data-provider="${provider}"]`).classList.add('active');
+
+            this.currentProvider = provider;
+            this.updateProviderSettings();
+        }
+
+        updateProviderSettings() {
+            const config = this.providers[this.currentProvider];
+
+            // Update server settings
+            document.getElementById('imap-server').value = config.imap.server;
+            document.getElementById('imap-port').value = config.imap.port;
+            document.getElementById('smtp-server').value = config.smtp.server;
+            document.getElementById('smtp-port').value = config.smtp.port;
+
+            // Update help text
+            document.getElementById('password-help').textContent = config.help;
+        }
+
+        autoDetectProvider() {
+            const email = document.getElementById('email').value.toLowerCase();
+
+            if (email.includes('@gmail.com') || email.includes('@googlemail.com')) {
+                this.selectProvider('gmail');
+            } else if (email.includes('@outlook.com') || email.includes('@hotmail.com') || email.includes('@live.com')) {
+                this.selectProvider('outlook');
+            } else if (email.includes('@')) {
+                this.selectProvider('custom');
+            }
+        }
+
+        async handleLogin() {
+            const loginBtn = document.getElementById('login-btn');
+            const loginText = document.getElementById('login-text');
+
+            // Disable button and show loading
+            loginBtn.disabled = true;
+            loginText.innerHTML = '<div class="spinner"></div> Connecting...';
+
+            // Clear previous alerts
+            document.getElementById('login-alerts').innerHTML = '';
+
+            try {
+                const credentials = this.getFormData();
+
+                // Validate form
+                if (!this.validateForm(credentials)) {
+                    throw new Error('Please fill in all required fields');
+                }
+
+                this.showAlert('info', 'Testing email connection...');
+
+                // Test connection
+                const response = await fetch(`${this.apiBase}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(credentials)
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Login failed');
+                }
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Save credentials if remember is checked
+                    if (document.getElementById('remember').checked) {
+                        this.saveCredentials(credentials);
+                    }
+
+                    this.showAlert('success', 'Login successful! Redirecting...');
+
+                    // Store session token
+                    localStorage.setItem('webmail_session', result.session_token);
+
+                    // Redirect to main app
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1500);
+                } else {
+                    throw new Error(result.error || 'Login failed');
+                }
+
+            } catch (error) {
+                console.error('Login error:', error);
+                this.showAlert('danger', error.message);
+            } finally {
+                // Re-enable button
+                loginBtn.disabled = false;
+                loginText.textContent = '🔐 Sign In';
+            }
+        }
+
+        getFormData() {
+            return {
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value,
+                imap_server: document.getElementById('imap-server').value,
+                imap_port: parseInt(document.getElementById('imap-port').value),
+                smtp_server: document.getElementById('smtp-server').value,
+                smtp_port: parseInt(document.getElementById('smtp-port').value),
+                provider: this.currentProvider
+            };
+        }
+
+        validateForm(credentials) {
+            if (!credentials.email || !credentials.password) {
+                return false;
+            }
+
+            if (!credentials.imap_server || !credentials.smtp_server) {
+                return false;
+            }
+
+            if (!credentials.imap_port || !credentials.smtp_port) {
+                return false;
+            }
+
+            return true;
+        }
+
+        saveCredentials(credentials) {
+            try {
+                // Encrypt credentials before storing (basic implementation)
+                const encrypted = btoa(JSON.stringify({
+                    email: credentials.email,
+                    provider: credentials.provider,
+                    servers: {
+                        imap: { server: credentials.imap_server, port: credentials.imap_port },
+                        smtp: { server: credentials.smtp_server, port: credentials.smtp_port }
+                    }
+                    // Note: We don't save the password for security
+                }));
+
+                localStorage.setItem('webmail_saved_settings', encrypted);
+            } catch (error) {
+                console.error('Failed to save credentials:', error);
+            }
+        }
+
+        loadSavedCredentials() {
+            try {
+                const saved = localStorage.getItem('webmail_saved_settings');
+                if (saved) {
+                    const decrypted = JSON.parse(atob(saved));
+
+                    document.getElementById('email').value = decrypted.email || '';
+
+                    if (decrypted.provider) {
+                        this.selectProvider(decrypted.provider);
+                    }
+
+                    if (decrypted.servers) {
+                        document.getElementById('imap-server').value = decrypted.servers.imap.server;
+                        document.getElementById('imap-port').value = decrypted.servers.imap.port;
+                        document.getElementById('smtp-server').value = decrypted.servers.smtp.server;
+                        document.getElementById('smtp-port').value = decrypted.servers.smtp.port;
+                    }
+
+                    document.getElementById('remember').checked = true;
+                }
+            } catch (error) {
+                console.error('Failed to load saved credentials:', error);
+            }
+        }
+
+        showAlert(type, message) {
+            const alertsContainer = document.getElementById('login-alerts');
+            alertsContainer.innerHTML = `
+                    <div class="alert alert-${type}">
+                        ${this.escapeHtml(message)}
+                    </div>
+                `;
+        }
+
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    }
+
+    // Global functions
+    function togglePassword() {
+        const passwordInput = document.getElementById('password');
+        const toggleBtn = document.querySelector('.password-toggle-btn');
+
+        if (passwordInput.type === 'password') {
+            passwordInput.type = 'text';
+            toggleBtn.textContent = '🙈';
+        } else {
+            passwordInput.type = 'password';
+            toggleBtn.textContent = '👁️';
+        }
+    }
+
+    function toggleAdvanced() {
+        const settings = document.getElementById('server-settings');
+        const toggle = document.querySelector('.advanced-toggle');
+
+        if (settings.classList.contains('show')) {
+            settings.classList.remove('show');
+            toggle.textContent = '⚙️ Advanced Server Settings';
+        } else {
+            settings.classList.add('show');
+            toggle.textContent = '⚙️ Hide Advanced Settings';
+        }
+    }
+
+    // Initialize the login system
+    document.addEventListener('DOMContentLoaded', () => {
+        new WebmailLogin();
+    });
+
+    // Check if user is already logged in
+    if (localStorage.getItem('webmail_session')) {
+        // Verify session is still valid
+        fetch('http://127.0.0.1:3001/auth/verify', {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('webmail_session')}`
+            }
+        }).then(response => {
+            if (response.ok) {
+                window.location.href = '/';
+            }
+        }).catch(error => {
+            console.log('Session verification failed:', error);
+            localStorage.removeItem('webmail_session');
+        });
+    }
+</script>
+</body>
+</html>

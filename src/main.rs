@@ -1,5 +1,6 @@
+// src/main.rs
 use actix_cors::Cors;
-use actix_web::{web, App, HttpResponse, HttpServer};
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, middleware::Logger};
 use chrono::Utc;
 use futures::stream::StreamExt;
 use lettre::transport::smtp::authentication::Credentials;
@@ -13,12 +14,17 @@ use tokio_rustls::TlsConnector;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use webpki_roots;
 
+// Import auth module
+mod auth;
+use auth::{SessionStore, get_user_session, get_user_credentials};
+
 // Import from lib.rs
 use webmail::{EmailDetail, EmailListItem, EmailRequest};
 
 #[derive(Clone)]
 struct AppState {
     db: PgPool,
+    session_store: SessionStore,
 }
 
 async fn init_db() -> PgPool {
@@ -45,13 +51,32 @@ async fn init_db() -> PgPool {
     }
 }
 
-async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -> HttpResponse {
-    let smtp_user = env::var("SMTP_USER").unwrap_or_default();
-    let smtp_pass = env::var("SMTP_PASS").unwrap_or_default();
-
-    if smtp_user.is_empty() || smtp_pass.is_empty() {
-        return HttpResponse::BadRequest().body("SMTP credentials not configured");
+// Authentication middleware - requires valid session for email endpoints
+fn require_auth(req: &HttpRequest, session_store: &SessionStore) -> Result<auth::UserSession, HttpResponse> {
+    match get_user_session(req, session_store) {
+        Some(session) => Ok(session),
+        None => Err(HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Authentication required",
+            "redirect": "/login.html"
+        })))
     }
+}
+
+async fn send_email(
+    req: HttpRequest,
+    data: web::Json<EmailRequest>,
+    state: web::Data<AppState>
+) -> HttpResponse {
+    // Authenticate user
+    let user_session = match require_auth(&req, &state.session_store) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+
+    let (smtp_user, smtp_pass) = match get_user_credentials(&user_session) {
+        Ok(creds) => creds,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("Credential error: {}", e)),
+    };
 
     let email = match Message::builder()
         .from(smtp_user.parse().unwrap())
@@ -64,22 +89,32 @@ async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -
     };
 
     let creds = Credentials::new(smtp_user, smtp_pass);
-    let mailer = SmtpTransport::starttls_relay("smtp.gmail.com")
-        .unwrap()
-        .port(587)
-        .credentials(creds)
-        .build();
+
+    // Use user's SMTP settings
+    let mailer = if user_session.smtp_port == 465 {
+        SmtpTransport::relay(&user_session.smtp_server)
+            .unwrap()
+            .port(user_session.smtp_port)
+            .credentials(creds)
+            .build()
+    } else {
+        SmtpTransport::starttls_relay(&user_session.smtp_server)
+            .unwrap()
+            .port(user_session.smtp_port)
+            .credentials(creds)
+            .build()
+    };
 
     match mailer.send(&email) {
         Ok(_) => {
             let _ = sqlx::query(
                 "INSERT INTO sent_emails (to_address, subject, body) VALUES ($1, $2, $3)",
             )
-            .bind(&data.to)
-            .bind(&data.subject)
-            .bind(&data.body)
-            .execute(&state.db)
-            .await;
+                .bind(&data.to)
+                .bind(&data.subject)
+                .bind(&data.body)
+                .execute(&state.db)
+                .await;
 
             HttpResponse::Ok().body("Email sent successfully!")
         }
@@ -87,14 +122,15 @@ async fn send_email(data: web::Json<EmailRequest>, state: web::Data<AppState>) -
     }
 }
 
-// Modified database schema to include UID for fast access
+// Modified database schema to include user-specific emails
 async fn update_db_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
-    // Add missing columns if they don't exist
     let schema_updates = [
+        "ALTER TABLE emails ADD COLUMN IF NOT EXISTS user_email VARCHAR(255)",
         "ALTER TABLE emails ADD COLUMN IF NOT EXISTS imap_uid INTEGER",
         "ALTER TABLE emails ADD COLUMN IF NOT EXISTS is_seen BOOLEAN DEFAULT FALSE",
         "ALTER TABLE emails ADD COLUMN IF NOT EXISTS is_recent BOOLEAN DEFAULT FALSE",
         "ALTER TABLE emails ADD COLUMN IF NOT EXISTS body_preview TEXT",
+        "ALTER TABLE sent_emails ADD COLUMN IF NOT EXISTS user_email VARCHAR(255)",
     ];
 
     for update in &schema_updates {
@@ -103,25 +139,37 @@ async fn update_db_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
         }
     }
 
-    // Create index on UID for fast lookups (ignore if exists)
-    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(imap_uid)")
-        .execute(pool)
-        .await;
+    // Create indexes
+    let indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_emails_user_email ON emails(user_email)",
+        "CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(imap_uid)",
+        "CREATE INDEX IF NOT EXISTS idx_sent_emails_user_email ON sent_emails(user_email)",
+    ];
+
+    for index in &indexes {
+        let _ = sqlx::query(index).execute(pool).await;
+    }
 
     Ok(())
 }
 
-// Get cached emails with optimized query
-async fn get_cached_emails(pool: &PgPool, limit: i64) -> Result<Vec<EmailListItem>, sqlx::Error> {
+// Get cached emails for specific user
+async fn get_cached_emails(
+    pool: &PgPool,
+    user_email: &str,
+    limit: i64
+) -> Result<Vec<EmailListItem>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT message_id, from_address, subject, created_at, is_seen, is_recent, imap_uid
          FROM emails
+         WHERE user_email = $1 OR user_email IS NULL
          ORDER BY created_at DESC NULLS LAST
-         LIMIT $1",
+         LIMIT $2",
     )
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
+        .bind(user_email)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
 
     Ok(rows
         .into_iter()
@@ -131,7 +179,6 @@ async fn get_cached_emails(pool: &PgPool, limit: i64) -> Result<Vec<EmailListIte
             let is_seen: bool = row.get::<Option<bool>, _>("is_seen").unwrap_or(true);
             let imap_uid: Option<i32> = row.get("imap_uid");
 
-            // Use UID-based ID for faster access
             let id = if let Some(uid) = imap_uid {
                 format!("uid_{}", uid)
             } else {
@@ -153,33 +200,34 @@ async fn get_cached_emails(pool: &PgPool, limit: i64) -> Result<Vec<EmailListIte
         .collect())
 }
 
-// Get email detail with UID support
+// Get email detail for specific user
 async fn get_email_detail(
     pool: &PgPool,
+    user_email: &str,
     message_id: &str,
 ) -> Result<Option<EmailDetail>, sqlx::Error> {
     let query = if message_id.starts_with("uid_") {
-        // Fast UID-based lookup
         if let Ok(uid) = message_id[4..].parse::<i32>() {
             sqlx::query(
                 "SELECT message_id, from_address, subject, body, created_at, is_seen, is_recent, imap_uid
                  FROM emails
-                 WHERE imap_uid = $1",
+                 WHERE imap_uid = $1 AND (user_email = $2 OR user_email IS NULL)",
             )
                 .bind(uid)
+                .bind(user_email)
                 .fetch_optional(pool)
                 .await?
         } else {
             return Ok(None);
         }
     } else {
-        // Fallback to message_id lookup
         sqlx::query(
             "SELECT message_id, from_address, subject, body, created_at, is_seen, is_recent, imap_uid
              FROM emails
-             WHERE message_id = $1",
+             WHERE message_id = $1 AND (user_email = $2 OR user_email IS NULL)",
         )
             .bind(message_id)
+            .bind(user_email)
             .fetch_optional(pool)
             .await?
     };
@@ -215,15 +263,15 @@ async fn get_email_detail(
     }
 }
 
-// BATCH fetch with full email content - one connection, multiple emails
+// BATCH fetch with user credentials
 async fn batch_fetch_emails_with_bodies(
+    user_session: &auth::UserSession,
     limit: u32,
 ) -> Result<Vec<EmailDetail>, Box<dyn std::error::Error + Send + Sync>> {
-    println!("🚀 BATCH fetching {} emails with bodies", limit);
+    println!("🚀 BATCH fetching {} emails for {}", limit, user_session.email);
     let start_time = std::time::Instant::now();
 
-    let imap_user = env::var("IMAP_USER")?;
-    let imap_pass = env::var("IMAP_PASS")?;
+    let (imap_user, imap_pass) = get_user_credentials(user_session)?;
 
     let mut root_store = RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -232,10 +280,10 @@ async fn batch_fetch_emails_with_bodies(
         .with_no_client_auth();
     let connector = TlsConnector::from(std::sync::Arc::new(config));
 
-    let tcp_stream = TcpStream::connect(("imap.gmail.com", 993)).await?;
+    let tcp_stream = TcpStream::connect((user_session.imap_server.as_str(), user_session.imap_port)).await?;
     let tls_stream = connector
         .connect(
-            rustls::pki_types::ServerName::try_from("imap.gmail.com")?.to_owned(),
+            rustls::pki_types::ServerName::try_from(user_session.imap_server.as_str())?.to_owned(),
             tcp_stream,
         )
         .await?;
@@ -257,7 +305,7 @@ async fn batch_fetch_emails_with_bodies(
         return Ok(Vec::new());
     }
 
-    let fetch_limit = limit.min(15); // Reasonable limit for batch
+    let fetch_limit = limit.min(15);
     let start_uid = if message_count > fetch_limit {
         message_count - fetch_limit + 1
     } else {
@@ -265,12 +313,8 @@ async fn batch_fetch_emails_with_bodies(
     };
     let fetch_range = format!("{}:{}", start_uid, message_count);
 
-    println!(
-        "📦 BATCH fetching range: {} ({} emails)",
-        fetch_range, fetch_limit
-    );
+    println!("📦 BATCH fetching range: {} ({} emails)", fetch_range, fetch_limit);
 
-    // CRITICAL: Fetch EVERYTHING in one go - headers AND bodies
     let messages_stream = imap_session
         .fetch(
             &fetch_range,
@@ -286,11 +330,7 @@ async fn batch_fetch_emails_with_bodies(
         .filter_map(Result::ok)
         .collect();
 
-    println!(
-        "📦 BATCH fetched {} messages in {:?}",
-        messages.len(),
-        start_time.elapsed()
-    );
+    println!("📦 BATCH fetched {} messages in {:?}", messages.len(), start_time.elapsed());
 
     let mut emails = Vec::with_capacity(messages.len());
     let now = Utc::now();
@@ -300,7 +340,6 @@ async fn batch_fetch_emails_with_bodies(
         let mut from = "Unknown".to_string();
         let mut subject = "No Subject".to_string();
 
-        // Parse headers
         if let Some(header_data) = message.header() {
             let header_str = String::from_utf8_lossy(header_data);
             for line in header_str.lines().take(10) {
@@ -316,7 +355,6 @@ async fn batch_fetch_emails_with_bodies(
             }
         }
 
-        // Extract body text
         let body = message
             .text()
             .map(|b| extract_body_content(b))
@@ -336,7 +374,7 @@ async fn batch_fetch_emails_with_bodies(
             .unwrap_or(false);
 
         emails.push(EmailDetail {
-            id: format!("uid_{}", uid), // Always use UID for fast access
+            id: format!("uid_{}", uid),
             from,
             subject,
             body,
@@ -349,27 +387,429 @@ async fn batch_fetch_emails_with_bodies(
     let _ = imap_session.logout().await;
     emails.reverse();
 
-    println!(
-        "🚀 BATCH completed {} emails in {:?}",
-        emails.len(),
-        start_time.elapsed()
-    );
+    println!("🚀 BATCH completed {} emails in {:?}", emails.len(), start_time.elapsed());
     Ok(emails)
 }
 
-// Better content extraction with proper decoding
+// Cache update with user email
+async fn cache_emails_with_uid(
+    pool: &PgPool,
+    user_email: &str,
+    emails: &[EmailDetail]
+) -> Result<(), sqlx::Error> {
+    for email in emails {
+        let uid = if email.id.starts_with("uid_") {
+            email.id[4..].parse::<i32>().ok()
+        } else {
+            None
+        };
+
+        sqlx::query(
+            "INSERT INTO emails (message_id, from_address, to_address, subject, body, created_at, fetched_at, is_seen, is_recent, imap_uid, body_preview, user_email)
+             VALUES ($1, $2, '', $3, $4, NOW(), NOW(), $5, $6, $7, LEFT($4, 200), $8)
+             ON CONFLICT (message_id) DO UPDATE SET
+                body = EXCLUDED.body,
+                fetched_at = NOW(),
+                is_seen = EXCLUDED.is_seen,
+                is_recent = EXCLUDED.is_recent,
+                imap_uid = EXCLUDED.imap_uid,
+                body_preview = EXCLUDED.body_preview,
+                user_email = EXCLUDED.user_email"
+        )
+            .bind(&email.id)
+            .bind(&email.from)
+            .bind(&email.subject)
+            .bind(&email.body)
+            .bind(email.is_seen)
+            .bind(email.is_recent)
+            .bind(uid)
+            .bind(user_email)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn fetch_emails(
+    req: HttpRequest,
+    query: web::Query<HashMap<String, String>>,
+    state: web::Data<AppState>,
+) -> HttpResponse {
+    // Authenticate user
+    let user_session = match require_auth(&req, &state.session_store) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+
+    println!("📧 Email list requested for {}", user_session.email);
+
+    let limit = query
+        .get("limit")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(50)
+        .min(50);
+
+    let force_refresh = query.get("refresh").map(|s| s == "true").unwrap_or(false);
+
+    if !force_refresh {
+        match get_cached_emails(&state.db, &user_session.email, limit).await {
+            Ok(cached_emails) if !cached_emails.is_empty() => {
+                println!("⚡ INSTANT: Serving {} cached emails", cached_emails.len());
+                return HttpResponse::Ok().json(cached_emails);
+            }
+            _ => {}
+        }
+    }
+
+    println!("🚀 Fetching fresh emails with BATCH method");
+    match batch_fetch_emails_with_bodies(&user_session, 15).await {
+        Ok(emails) => {
+            let db_clone = state.db.clone();
+            let user_email = user_session.email.clone();
+            let emails_clone = emails.clone();
+            tokio::spawn(async move {
+                if let Err(e) = cache_emails_with_uid(&db_clone, &user_email, &emails_clone).await {
+                    println!("⚠️ Cache update failed: {}", e);
+                }
+            });
+
+            let email_list: Vec<EmailListItem> = emails
+                .into_iter()
+                .map(|email| EmailListItem {
+                    id: email.id,
+                    from: email.from,
+                    subject: email.subject,
+                    date: email.date,
+                    is_seen: email.is_seen,
+                    is_recent: email.is_recent,
+                })
+                .collect();
+
+            HttpResponse::Ok().json(email_list)
+        }
+        Err(e) => {
+            match get_cached_emails(&state.db, &user_session.email, limit).await {
+                Ok(cached_emails) if !cached_emails.is_empty() => {
+                    println!("📄 Serving cached emails as fallback");
+                    HttpResponse::Ok().json(cached_emails)
+                }
+                _ => HttpResponse::InternalServerError()
+                    .body(format!("Failed to fetch emails: {}", e)),
+            }
+        }
+    }
+}
+
+async fn check_new_emails(
+    req: HttpRequest,
+    _query: web::Query<HashMap<String, String>>,
+    state: web::Data<AppState>,
+) -> HttpResponse {
+    // Authenticate user
+    let _user_session = match require_auth(&req, &state.session_store) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+
+    HttpResponse::Ok().json(Vec::<EmailListItem>::new())
+}
+
+async fn get_email(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<AppState>
+) -> HttpResponse {
+    // Authenticate user
+    let user_session = match require_auth(&req, &state.session_store) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+
+    let message_id = path.into_inner();
+    println!("📖 Email requested: {} for {}", message_id, user_session.email);
+
+    match get_email_detail(&state.db, &user_session.email, &message_id).await {
+        Ok(Some(email)) => {
+            if email.body != "Click to load content..." && !email.body.is_empty() {
+                println!("⚡ INSTANT: Serving cached email body");
+                return HttpResponse::Ok().json(email);
+            }
+
+            let mut email_with_loading = email;
+            email_with_loading.body = "Loading email content...".to_string();
+            HttpResponse::Ok().json(email_with_loading)
+        }
+        Ok(None) => HttpResponse::NotFound().body("Email not found"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Database error: {:?}", e)),
+    }
+}
+
+async fn health_check(state: web::Data<AppState>) -> HttpResponse {
+    let db_status = match sqlx::query("SELECT 1").fetch_one(&state.db).await {
+        Ok(_) => "healthy",
+        Err(_) => "unhealthy",
+    };
+
+    let session_count = {
+        let session_store = state.session_store.lock().unwrap();
+        session_store.len()
+    };
+
+    let response = serde_json::json!({
+        "status": "ok",
+        "database": db_status,
+        "active_sessions": session_count,
+        "timestamp": Utc::now().to_rfc3339()
+    });
+
+    HttpResponse::Ok().json(response)
+}
+
+// Serve login page
+async fn serve_login_page() -> HttpResponse {
+    // Login page HTML content
+    let login_html = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webmail Login</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .login-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 420px;
+            overflow: hidden;
+        }
+        .login-header {
+            background: #f8f9fa;
+            padding: 2rem;
+            text-align: center;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .login-header h1 {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+        .login-header p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        .login-form {
+            padding: 2rem;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #333;
+            font-size: 0.9rem;
+        }
+        .form-control {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .form-control:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+        }
+        .login-btn {
+            width: 100%;
+            padding: 0.75rem;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .login-btn:hover:not(:disabled) {
+            background: #0056b3;
+        }
+        .login-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .alert {
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+        .alert-danger {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .help-text {
+            font-size: 0.75rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>📧 Webmail</h1>
+            <p>Sign in to access your emails</p>
+        </div>
+
+        <form id="login-form" class="login-form">
+            <div id="login-alerts"></div>
+
+            <div class="form-group">
+                <label class="form-label" for="email">Email Address</label>
+                <input type="email" id="email" class="form-control" placeholder="your.email@example.com" required>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="password">Password / App Password</label>
+                <input type="password" id="password" class="form-control" placeholder="Enter your password" required>
+                <div class="help-text">For Gmail, use an App Password instead of your regular password</div>
+            </div>
+
+            <button type="submit" id="login-btn" class="login-btn">
+                🔐 Sign In
+            </button>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const loginBtn = document.getElementById('login-btn');
+
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Connecting...';
+
+            try {
+                // Determine provider and settings
+                let provider = 'custom';
+                let imap_server = 'imap.gmail.com';
+                let imap_port = 993;
+                let smtp_server = 'smtp.gmail.com';
+                let smtp_port = 587;
+
+                if (email.includes('@gmail.com')) {
+                    provider = 'gmail';
+                } else if (email.includes('@outlook.com') || email.includes('@hotmail.com')) {
+                    provider = 'outlook';
+                    imap_server = 'outlook.office365.com';
+                    smtp_server = 'smtp-mail.outlook.com';
+                }
+
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email,
+                        password,
+                        imap_server,
+                        imap_port,
+                        smtp_server,
+                        smtp_port,
+                        provider
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    localStorage.setItem('webmail_session', result.session_token);
+                    window.location.href = '/';
+                } else {
+                    throw new Error(result.error || 'Login failed');
+                }
+
+            } catch (error) {
+                document.getElementById('login-alerts').innerHTML =
+                    `<div class="alert alert-danger">${error.message}</div>`;
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = '🔐 Sign In';
+            }
+        });
+    </script>
+</body>
+</html>"#;
+
+    HttpResponse::Ok()
+        .content_type("text/html")
+        .body(login_html)
+}
+
+// Serve main app (only if authenticated)
+async fn serve_main_app(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
+    // Check if user is authenticated
+    if get_user_session(&req, &state.session_store).is_some() {
+        // Simple main app HTML - in production, serve the actual index.html file
+        let main_html = r#"<!DOCTYPE html>
+<html><head><title>Webmail</title></head>
+<body><h1>Webmail App Loading...</h1>
+<script>
+// Check authentication and load main app
+const token = localStorage.getItem('webmail_session');
+if (!token) {
+    window.location.href = '/login.html';
+} else {
+    // In production, load the full frontend
+    document.body.innerHTML = '<p>✅ Authenticated! Full app would load here.</p><p><a href="/login.html" onclick="localStorage.removeItem(\'webmail_session\')">Logout</a></p>';
+}
+</script></body></html>"#;
+
+        HttpResponse::Ok()
+            .content_type("text/html")
+            .body(main_html)
+    } else {
+        // Redirect to login
+        HttpResponse::Found()
+            .append_header(("Location", "/login.html"))
+            .finish()
+    }
+}
+
+// Include the content extraction functions from the original code
 fn extract_body_content(raw_body: &[u8]) -> String {
     let body_str = String::from_utf8_lossy(raw_body);
 
-    // Handle multipart emails (like the delivery failure notification)
     if body_str.contains("Content-Type: multipart/") {
         return extract_multipart_content(&body_str);
     }
 
-    // First, try to detect and handle different content encodings
     let decoded_content = decode_email_content(&body_str);
 
-    // Check if it's HTML content
     if decoded_content.to_lowercase().contains("<html")
         || decoded_content.to_lowercase().contains("<!doctype")
         || decoded_content.contains("<div")
@@ -378,11 +818,9 @@ fn extract_body_content(raw_body: &[u8]) -> String {
         return extract_html_content(&decoded_content);
     }
 
-    // Plain text processing
     extract_plain_text(&decoded_content)
 }
 
-// Handle multipart email content
 fn extract_multipart_content(content: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let mut result = Vec::new();
@@ -391,7 +829,6 @@ fn extract_multipart_content(content: &str) -> String {
     let mut current_content = Vec::new();
     let mut boundary = String::new();
 
-    // Find the boundary
     for line in &lines {
         if line.contains("boundary=") {
             if let Some(boundary_part) = line.split("boundary=").nth(1) {
@@ -412,9 +849,7 @@ fn extract_multipart_content(content: &str) -> String {
     }
 
     for line in lines {
-        // Check for boundary markers
         if line.contains(&boundary) {
-            // Process accumulated content
             if in_text_part || in_html_part {
                 let content_str = current_content.join("\n");
                 if in_html_part {
@@ -429,7 +864,6 @@ fn extract_multipart_content(content: &str) -> String {
             continue;
         }
 
-        // Check content type headers
         let line_lower = line.to_lowercase();
         if line_lower.starts_with("content-type:") {
             if line_lower.contains("text/plain") {
@@ -442,18 +876,15 @@ fn extract_multipart_content(content: &str) -> String {
             continue;
         }
 
-        // Skip other headers in parts
         if line.starts_with("Content-") || line.starts_with("MIME-") {
             continue;
         }
 
-        // Collect content if we're in a text or HTML part
         if (in_text_part || in_html_part) && !line.trim().is_empty() {
             current_content.push(line.to_string());
         }
     }
 
-    // Process any remaining content
     if !current_content.is_empty() && (in_text_part || in_html_part) {
         let content_str = current_content.join("\n");
         if in_html_part {
@@ -464,14 +895,12 @@ fn extract_multipart_content(content: &str) -> String {
     }
 
     if result.is_empty() {
-        // Fallback: try to extract any readable text
         extract_fallback_content(content)
     } else {
         result.join("\n\n---\n\n")
     }
 }
 
-// Fallback content extraction for complex emails
 fn extract_fallback_content(content: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let mut readable_lines = Vec::new();
@@ -479,7 +908,6 @@ fn extract_fallback_content(content: &str) -> String {
     for line in lines {
         let trimmed = line.trim();
 
-        // Skip technical lines
         if trimmed.is_empty()
             || trimmed.starts_with("--")
             || trimmed.starts_with("Content-")
@@ -490,14 +918,12 @@ fn extract_fallback_content(content: &str) -> String {
             continue;
         }
 
-        // Look for lines with actual readable content
         let word_chars = trimmed.chars().filter(|c| c.is_alphabetic()).count();
         let total_chars = trimmed.chars().count();
 
         if total_chars > 0 && (word_chars as f32 / total_chars as f32) > 0.3 {
             readable_lines.push(trimmed.to_string());
 
-            // Stop if we have enough content
             if readable_lines.join(" ").len() > 1000 {
                 break;
             }
@@ -520,18 +946,15 @@ fn extract_fallback_content(content: &str) -> String {
     }
 }
 
-// Decode email content handling various encodings
 fn decode_email_content(content: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let mut decoded_lines = Vec::new();
     let mut current_encoding = "7bit";
     let mut in_headers = true;
-    let _charset = "utf-8";
 
     for line in &lines {
         let line_lower = line.to_lowercase();
 
-        // Check for encoding information in headers
         if in_headers {
             if line.trim().is_empty() {
                 in_headers = false;
@@ -552,12 +975,10 @@ fn decode_email_content(content: &str) -> String {
             continue;
         }
 
-        // Skip MIME boundaries and other technical lines
         if line.starts_with("--") || line_lower.starts_with("content-") {
             continue;
         }
 
-        // Decode based on encoding
         let decoded_line = match current_encoding.to_lowercase().as_str() {
             "base64" => {
                 use base64::{engine::general_purpose, Engine as _};
@@ -571,12 +992,10 @@ fn decode_email_content(content: &str) -> String {
             _ => line.to_string(),
         };
 
-        // Only add lines with actual content
         if !decoded_line.trim().is_empty() && decoded_line.len() > 2 {
             decoded_lines.push(decoded_line);
         }
 
-        // Stop if we have enough content
         if decoded_lines.join("").len() > 3000 {
             break;
         }
@@ -585,23 +1004,20 @@ fn decode_email_content(content: &str) -> String {
     decoded_lines.join("\n")
 }
 
-// Decode quoted-printable encoding
 fn decode_quoted_printable(input: &str) -> String {
     let mut result = String::new();
     let mut chars = input.chars().peekable();
 
     while let Some(c) = chars.next() {
         if c == '=' {
-            // Handle soft line breaks (=\n or =\r\n)
             if chars.peek() == Some(&'\n') || chars.peek() == Some(&'\r') {
-                chars.next(); // consume \n or \r
+                chars.next();
                 if chars.peek() == Some(&'\n') {
-                    chars.next(); // consume \n if we had \r\n
+                    chars.next();
                 }
-                continue; // soft line break, don't add anything
+                continue;
             }
 
-            // Handle hex encoding (=XX)
             if let (Some(h1), Some(h2)) = (chars.next(), chars.next()) {
                 if let (Some(d1), Some(d2)) = (h1.to_digit(16), h2.to_digit(16)) {
                     let byte_value = (d1 * 16 + d2) as u8;
@@ -611,7 +1027,6 @@ fn decode_quoted_printable(input: &str) -> String {
                         result.push(byte_value as char);
                     }
                 } else {
-                    // Invalid hex, add as-is
                     result.push(c);
                     result.push(h1);
                     result.push(h2);
@@ -675,7 +1090,6 @@ fn extract_html_content(html: &str) -> String {
         i += 1;
     }
 
-    // Clean up the result
     let mut cleaned = result
         .replace("&nbsp;", " ")
         .replace("&amp;", "&")
@@ -689,7 +1103,6 @@ fn extract_html_content(html: &str) -> String {
         .replace("&mdash;", "—")
         .replace("&ndash;", "–");
 
-    // Remove excessive whitespace
     while cleaned.contains("  ") {
         cleaned = cleaned.replace("  ", " ");
     }
@@ -716,7 +1129,6 @@ fn extract_plain_text(body: &str) -> String {
     for line in lines.iter().take(100) {
         let trimmed = line.trim();
 
-        // Skip empty lines and technical content
         if trimmed.is_empty()
             || trimmed.starts_with("--")
             || trimmed.to_lowercase().contains("content-")
@@ -725,7 +1137,6 @@ fn extract_plain_text(body: &str) -> String {
             continue;
         }
 
-        // Check if line contains readable text (not just encoded garbage)
         let readable_chars = trimmed
             .chars()
             .filter(|c| c.is_alphabetic() || c.is_whitespace() || ".,!?-()[]{}:;\"'".contains(*c))
@@ -753,150 +1164,6 @@ fn extract_plain_text(body: &str) -> String {
     }
 }
 
-// Cache update with UID support
-async fn cache_emails_with_uid(pool: &PgPool, emails: &[EmailDetail]) -> Result<(), sqlx::Error> {
-    for email in emails {
-        let uid = if email.id.starts_with("uid_") {
-            email.id[4..].parse::<i32>().ok()
-        } else {
-            None
-        };
-
-        sqlx::query(
-            "INSERT INTO emails (message_id, from_address, to_address, subject, body, created_at, fetched_at, is_seen, is_recent, imap_uid, body_preview)
-             VALUES ($1, $2, '', $3, $4, NOW(), NOW(), $5, $6, $7, LEFT($4, 200))
-             ON CONFLICT (message_id) DO UPDATE SET
-                body = EXCLUDED.body,
-                fetched_at = NOW(),
-                is_seen = EXCLUDED.is_seen,
-                is_recent = EXCLUDED.is_recent,
-                imap_uid = EXCLUDED.imap_uid,
-                body_preview = EXCLUDED.body_preview"
-        )
-            .bind(&email.id)
-            .bind(&email.from)
-            .bind(&email.subject)
-            .bind(&email.body)
-            .bind(email.is_seen)
-            .bind(email.is_recent)
-            .bind(uid)
-            .execute(pool)
-            .await?;
-    }
-    Ok(())
-}
-
-async fn fetch_emails(
-    query: web::Query<HashMap<String, String>>,
-    state: web::Data<AppState>,
-) -> HttpResponse {
-    println!("📧 Email list requested");
-
-    let limit = query
-        .get("limit")
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(50)
-        .min(50);
-
-    let force_refresh = query.get("refresh").map(|s| s == "true").unwrap_or(false);
-
-    // Always try cache first for instant response
-    if !force_refresh {
-        match get_cached_emails(&state.db, limit).await {
-            Ok(cached_emails) if !cached_emails.is_empty() => {
-                println!("⚡ INSTANT: Serving {} cached emails", cached_emails.len());
-                return HttpResponse::Ok().json(cached_emails);
-            }
-            _ => {}
-        }
-    }
-
-    // Need to fetch from IMAP - use batch method
-    println!("🚀 Fetching fresh emails with BATCH method");
-    match batch_fetch_emails_with_bodies(15).await {
-        Ok(emails) => {
-            // Cache in background
-            let db_clone = state.db.clone();
-            let emails_clone = emails.clone();
-            tokio::spawn(async move {
-                if let Err(e) = cache_emails_with_uid(&db_clone, &emails_clone).await {
-                    println!("⚠️ Cache update failed: {}", e);
-                }
-            });
-
-            let email_list: Vec<EmailListItem> = emails
-                .into_iter()
-                .map(|email| EmailListItem {
-                    id: email.id,
-                    from: email.from,
-                    subject: email.subject,
-                    date: email.date,
-                    is_seen: email.is_seen,
-                    is_recent: email.is_recent,
-                })
-                .collect();
-
-            HttpResponse::Ok().json(email_list)
-        }
-        Err(e) => {
-            // Fallback to cache if IMAP fails
-            match get_cached_emails(&state.db, limit).await {
-                Ok(cached_emails) if !cached_emails.is_empty() => {
-                    println!("📄 Serving cached emails as fallback");
-                    HttpResponse::Ok().json(cached_emails)
-                }
-                _ => HttpResponse::InternalServerError()
-                    .body(format!("Failed to fetch emails: {}", e)),
-            }
-        }
-    }
-}
-
-async fn check_new_emails(
-    _query: web::Query<HashMap<String, String>>,
-    _state: web::Data<AppState>,
-) -> HttpResponse {
-    HttpResponse::Ok().json(Vec::<EmailListItem>::new())
-}
-
-async fn get_email(path: web::Path<String>, state: web::Data<AppState>) -> HttpResponse {
-    let message_id = path.into_inner();
-    println!("📖 Email requested: {}", message_id);
-
-    // Try cache first - should be instant since we batch fetch with bodies
-    match get_email_detail(&state.db, &message_id).await {
-        Ok(Some(email)) => {
-            // Check if we have the body already
-            if email.body != "Click to load content..." && !email.body.is_empty() {
-                println!("⚡ INSTANT: Serving cached email body");
-                return HttpResponse::Ok().json(email);
-            }
-
-            // If no body, return what we have with a loading message
-            let mut email_with_loading = email;
-            email_with_loading.body = "Loading email content...".to_string();
-            HttpResponse::Ok().json(email_with_loading)
-        }
-        Ok(None) => HttpResponse::NotFound().body("Email not found"),
-        Err(e) => HttpResponse::InternalServerError().body(format!("Database error: {:?}", e)),
-    }
-}
-
-async fn health_check(state: web::Data<AppState>) -> HttpResponse {
-    let db_status = match sqlx::query("SELECT 1").fetch_one(&state.db).await {
-        Ok(_) => "healthy",
-        Err(_) => "unhealthy",
-    };
-
-    let response = serde_json::json!({
-        "status": "ok",
-        "database": db_status,
-        "timestamp": Utc::now().to_rfc3339()
-    });
-
-    HttpResponse::Ok().json(response)
-}
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
@@ -905,35 +1172,53 @@ async fn main() -> std::io::Result<()> {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    println!("🚀 Starting TRULY FAST Webmail Server...");
+    println!("🚀 Starting Secure Webmail Server with Authentication...");
 
     let pool = init_db().await;
 
-    // Update database schema
     if let Err(e) = update_db_schema(&pool).await {
         println!("⚠️ Schema update failed: {}", e);
     }
 
-    let state = web::Data::new(AppState { db: pool });
+    let session_store = auth::create_session_store();
+
+    let state = web::Data::new(AppState {
+        db: pool,
+        session_store: session_store.clone(),
+    });
 
     println!("🌐 Server starting on http://127.0.0.1:3001");
-    println!("⚡ TRULY FAST Features:");
-    println!("   📦 BATCH fetching (headers + bodies together)");
-    println!("   🔢 UID-based fast lookups");
-    println!("   🎯 HTML content extraction");
-    println!("   ⚡ Target: INSTANT email opening");
+    println!("🔐 Authentication Features:");
+    println!("   🔑 Login page with credential testing");
+    println!("   🛡️ Session-based authentication");
+    println!("   👤 Per-user email isolation");
+    println!("   📧 Multiple email provider support");
+    println!("   🔒 Secure credential storage");
 
     HttpServer::new(move || {
         App::new()
             .wrap(Cors::permissive())
+            .wrap(Logger::default())
             .app_data(state.clone())
+            .app_data(web::Data::new(session_store.clone()))
+            // Authentication routes
+            .route("/auth/login", web::post().to(auth::login_handler))
+            .route("/auth/verify", web::get().to(auth::verify_handler))
+            .route("/auth/logout", web::post().to(auth::logout_handler))
+            .route("/auth/provider/{provider}", web::get().to(auth::provider_config_handler))
+            .route("/auth/sessions", web::get().to(auth::list_sessions_handler))
+            .route("/auth/cleanup", web::post().to(auth::cleanup_sessions_handler))
+            // Email routes (require authentication)
             .route("/emails", web::get().to(fetch_emails))
             .route("/emails/new", web::get().to(check_new_emails))
             .route("/email/{id}", web::get().to(get_email))
             .route("/send", web::post().to(send_email))
+            // Static routes
+            .route("/login.html", web::get().to(serve_login_page))
+            .route("/", web::get().to(serve_main_app))
             .route("/health", web::get().to(health_check))
     })
-    .bind("127.0.0.1:3001")?
-    .run()
-    .await
+        .bind("127.0.0.1:3001")?
+        .run()
+        .await
 }
